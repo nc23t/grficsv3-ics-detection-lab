@@ -1,0 +1,17 @@
+.env
+.env.local
+*.key
+*.pem
+__pycache__/
+*.pyc
+.venv/
+venv/
+eve.json
+suricata.log
+*.pcap
+*.pcapng
+
+# Claude Code local state - can contain live credentials from approved
+# bash commands (e.g. exported API keys), never intended for this repo.
+.claude/settings.local.json
+.claude/

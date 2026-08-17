@@ -1,0 +1,38 @@
+{
+  "case_id": "002_register_write",
+  "sid": 1000002,
+  "note": "Unauthorized FC6 register write to holding register 102 (purge valve mirror) from Kali. Direct setpoint manipulation, unambiguous.",
+  "expect": {
+    "severity_min": "high",
+    "mitre_technique_id": "T0855",
+    "category": "command-injection",
+    "requires_human_review": true
+  },
+  "text_checks": {
+    "severity_reason": {
+      "min_len": 20,
+      "max_len": 650
+    },
+    "what_happened": {
+      "min_len": 40,
+      "max_len": 800,
+      "required_keywords": [
+        "register",
+        "102"
+      ]
+    },
+    "likely_attack": {
+      "min_len": 20,
+      "max_len": 650
+    }
+  },
+  "array_checks": {
+    "actions": {
+      "min_items": 1,
+      "max_items": 10
+    },
+    "tags": {
+      "min_items": 1
+    }
+  }
+}

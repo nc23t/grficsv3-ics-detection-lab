@@ -1,0 +1,46 @@
+{
+  "_frozen_input_note": "Synthetic, not a live capture. sid 1000003 requires an HTTP POST to /upload-program-action, the highest-impact rule (replaces PLC control logic), so this fixture was hand-built to match Suricata's real eve.json HTTP alert schema rather than run against the live PLC. See evals/expected/006_st_program_upload.expected.json for rationale.",
+  "timestamp": "2026-07-31T14:00:00.000000-0700",
+  "flow_id": 384729103847291,
+  "in_iface": "eno1",
+  "event_type": "alert",
+  "src_ip": "192.168.90.6",
+  "src_port": 51442,
+  "dest_ip": "192.168.95.2",
+  "dest_port": 8080,
+  "proto": "TCP",
+  "pkt_src": "wire/pcap",
+  "tx_id": 0,
+  "alert": {
+    "action": "allowed",
+    "gid": 1,
+    "signature_id": 1000003,
+    "rev": 1,
+    "signature": "Unauthorized Program Upload to PLC",
+    "category": "",
+    "severity": 1
+  },
+  "http": {
+    "hostname": "192.168.95.2",
+    "url": "/upload-program-action",
+    "http_user_agent": "python-requests/2.31.0",
+    "http_content_type": "multipart/form-data",
+    "http_method": "POST",
+    "protocol": "HTTP/1.1",
+    "status": 200,
+    "length": 1204
+  },
+  "app_proto": "http",
+  "direction": "to_server",
+  "flow": {
+    "pkts_toserver": 8,
+    "pkts_toclient": 6,
+    "bytes_toserver": 1450,
+    "bytes_toclient": 620,
+    "start": "2026-07-31T13:59:59.987654-0700",
+    "src_ip": "192.168.90.6",
+    "dest_ip": "192.168.95.2",
+    "src_port": 51442,
+    "dest_port": 8080
+  }
+}

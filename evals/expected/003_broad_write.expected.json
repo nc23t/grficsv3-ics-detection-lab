@@ -1,0 +1,40 @@
+{
+  "case_id": "003_broad_write",
+  "sid": 1000004,
+  "note": "Broad unauthorized-write rule (any function code) from Kali. MITRE hint offers two candidates depending on whether the payload is a coil/register write vs a program upload, so this checks either is acceptable rather than pinning one exact ID.",
+  "expect": {
+    "severity_min": "high",
+    "mitre_technique_id_any_of": [
+      "T0855",
+      "T0821"
+    ],
+    "category": "command-injection",
+    "requires_human_review": true
+  },
+  "text_checks": {
+    "severity_reason": {
+      "min_len": 20,
+      "max_len": 650
+    },
+    "what_happened": {
+      "min_len": 40,
+      "max_len": 800,
+      "required_keywords": [
+        "Modbus"
+      ]
+    },
+    "likely_attack": {
+      "min_len": 20,
+      "max_len": 650
+    }
+  },
+  "array_checks": {
+    "actions": {
+      "min_items": 1,
+      "max_items": 10
+    },
+    "tags": {
+      "min_items": 1
+    }
+  }
+}
