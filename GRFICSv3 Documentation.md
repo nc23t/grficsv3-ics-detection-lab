@@ -2390,11 +2390,10 @@ Restarted the pipeline and reran the coil-write test live. None of the alerts ac
 
 # Current Status
 
-This is a living document, not a finished writeup. As of this update, the following is built and working end to end: Stages 1-3 (recon, Modbus mapping, and the full attack catalog, MITM concealment, coil manipulation, ST injection, replay, register hammering, holding register sweep), Stage 4's detection layer (six custom Suricata rules, SIDs 1000001-1000010, alert-only/IDS mode), and Stage 5's AI enrichment pipeline (Flask + forced tool-use Claude integration, dashboard front end).
+This is a living document, not a finished writeup. As of this update, the following is built and working end to end: Stages 1-3 (recon, Modbus mapping, and the full attack catalog, MITM concealment, coil manipulation, ST injection, replay, register hammering, holding register sweep), Stage 4's detection layer (six custom Suricata rules, SIDs 1000001-1000010, alert-only/IDS mode), and Stage 5's AI enrichment pipeline (Flask + forced tool-use Claude integration, dashboard front end, plus a frozen-input eval harness for regression-testing prompt/model/parsing changes — see [Eval Harness: Built and Passing](#eval-harness-built-and-passing)).
 
 What's still open, and what I'm working on next:
 
-- **Eval harness for `ics_alert_pipeline.py`**: a frozen set of captured `eve.json` alerts covering the attack catalog plus a benign baseline, so prompt/model/parsing changes get regression-tested instead of caught by hand (see the note at the top of this doc).
 - **Phase 4: IPS conversion**: moving Suricata from alert-only to inline drop mode on the high-confidence surgical rules, while keeping the broad catch-all as alert-only.
 - **Phase 5: Wazuh integration**: feeding `eve.json` into the Wazuh stack for aggregation and dashboards, closing the red-to-blue loop.
 - **Product valve (register 103) attack**: the holding-register hammer attack didn't produce a physical pressure change because it hit a mirrored register, not the actuator (see Stage 3). Attacking the product valve instead, which actually draws mass out of the reactor, is the more promising path to a real physical effect, and is still an open experiment.
