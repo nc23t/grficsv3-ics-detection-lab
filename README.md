@@ -4,6 +4,8 @@ End-to-end ICS security lab: adversary emulation against a simulated chemical re
 
 > **Status:** Active portfolio project. See [Project status and roadmap](#project-status-and-roadmap) for what is implemented, what is planned, and known limitations.
 
+> **Disclaimer:** Every attack documented here targets an isolated, self-hosted GRFICSv3 simulation with no connection to real industrial equipment. This repo is published for security education and authorized-research purposes only, it is not instruction for attacking real production ICS/OT environments. Unauthorized access to real industrial control systems is illegal and can cause physical harm.
+
 ## Overview
 
 This is a portfolio project documenting full-stack ICS security work against [GRFICSv3](https://github.com/Fortiphyd/GRFICSv3), Fortiphyd Logic's Dockerized chemical reactor simulation. It covers the complete attacker and defender loop: reconnaissance, Modbus register manipulation, replay attacks, and MITM concealment, followed by custom Suricata detections and an LLM-enriched alert pipeline built to reduce analyst triage time.

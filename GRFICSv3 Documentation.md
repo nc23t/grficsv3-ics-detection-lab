@@ -2,7 +2,7 @@
 
 # GRFICSv3 Documentation
 
-
+> **Disclaimer:** Every attack documented here targets an isolated, self-hosted GRFICSv3 simulation with no connection to real industrial equipment. This document is published for security education and authorized-research purposes only, it is not instruction for attacking real production ICS/OT environments. Unauthorized access to real industrial control systems is illegal and can cause physical harm.
 
 ## Table of Contents
 
