@@ -1,38 +1,42 @@
 {
-  "case_id": "001_coil_write",
-  "sid": 1000001,
-  "note": "Unauthorized FC5 coil write to coil 40 (Chemical A feed) from Kali. Direct actuator manipulation, unambiguous.",
-  "expect": {
-    "severity_min": "high",
-    "mitre_technique_id": "T0855",
-    "category": "command-injection",
-    "requires_human_review": true
-  },
-  "text_checks": {
-    "severity_reason": {
-      "min_len": 20,
-      "max_len": 650
+    "case_id": "001_coil_write",
+    "sid": 1000001,
+    "note": "Unauthorized FC5 coil write to coil 40 (Chemical A feed) from Kali. Direct actuator manipulation, unambiguous.",
+    "expect": {
+        "severity_min": "high",
+        "mitre_technique_id": "T0855",
+        "category": "command-injection",
+        "requires_human_review": true
     },
-    "what_happened": {
-      "min_len": 40,
-      "max_len": 800,
-      "required_keywords": [
-        "coil",
-        "40"
-      ]
+    "text_checks": {
+        "severity_reason": {
+            "min_len": 20,
+            "max_len": 650
+        },
+        "what_happened": {
+            "min_len": 40,
+            "max_len": 800,
+            "required_keywords": [
+                "coil",
+                "40"
+            ]
+        },
+        "likely_attack": {
+            "min_len": 20,
+            "max_len": 650
+        }
     },
-    "likely_attack": {
-      "min_len": 20,
-      "max_len": 650
+    "array_checks": {
+        "tags": {
+            "min_items": 1
+        },
+        "immediate_actions": {
+            "min_items": 1,
+            "max_items": 4
+        },
+        "after_neutralized_actions": {
+            "min_items": 1,
+            "max_items": 4
+        }
     }
-  },
-  "array_checks": {
-    "actions": {
-      "min_items": 1,
-      "max_items": 10
-    },
-    "tags": {
-      "min_items": 1
-    }
-  }
 }

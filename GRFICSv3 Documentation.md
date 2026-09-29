@@ -2,57 +2,13 @@
 
 # GRFICSv3 Documentation
 
-> **Disclaimer:** Every attack documented here targets an isolated, self-hosted GRFICSv3 simulation with no connection to real industrial equipment. This document is published for security education and authorized-research purposes only, it is not instruction for attacking real production ICS/OT environments. Unauthorized access to real industrial control systems is illegal and can cause physical harm.
-
-## Table of Contents
-
-- [Stage 1: Reconnaissance & Environment Mapping](#stage-1-reconnaissance-environment-mapping)
-  - [Topology](#topology)
-  - [Understanding the ICS Chemical Process](#understanding-the-ics-chemical-process)
-- [Stage 2: Modbus Protocol Analysis](#stage-2-modbus-protocol-analysis)
-  - [Capturing Traffic from HMI](#capturing-traffic-from-hmi)
-- [Stage 3: Attack Execution](#stage-3-attack-execution)
-  - [Wireshark arpspoof Attack](#wireshark-arpspoof-attack)
-  - [Register Manipulation Attack w/ MITM](#register-manipulation-attack-w-mitm)
-  - [Coil Manipulation Attack](#coil-manipulation-attack)
-  - [Injected Structured Text (ST) Attack](#injected-structured-text-st-attack)
-  - [Replay Attack](#replay-attack)
-  - [Holding Register Write Attack](#holding-register-write-attack)
-- [Stage 4: Detection and Defense](#stage-4-detection-and-defense)
-  - [Setup](#setup)
-  - [What are Rules?](#what-are-rules)
-  - [Installing Rules](#installing-rules)
-  - [Creating Custom Rules](#creating-custom-rules)
-  - [Placing the 1st Custom Rule](#placing-the-1st-custom-rule)
-  - [Rule Roadmap](#rule-roadmap)
-  - [Phase 1: Surgical detection rules](#phase-1-surgical-detection-rules)
-- [Stage 5: AI-Assisted Alert Enrichment](#stage-5-ai-assisted-alert-enrichment)
-  - [Suricata Rules](#suricata-rules)
-  - [Adding and Verifying Rules Work](#adding-and-verifying-rules-work)
-  - [Process Sequence](#process-sequence)
-  - [Starting the AI response](#starting-the-ai-response)
-  - [Fixing the Parse Errors for Good: Forced Tool Use](#fixing-the-parse-errors-for-good-forced-tool-use)
-  - [Verifying the Tool-Use Fix and a Second Bug It Uncovered](#verifying-the-tool-use-fix-and-a-second-bug-it-uncovered)
-  - [Dashboard UX Fixes and a MITRE ATT&CK Layer](#dashboard-ux-fixes-and-a-mitre-attck-layer)
-- [Current Status](#current-status)
-  - [To add](#to-add)
-  - [Key Concepts](#key-concepts)
-  - [How It Works](#how-it-works)
-  - [Directory Structure](#directory-structure)
-  - [Comparison Strategies](#comparison-strategies)
-  - [Suggested Frozen Input Set for ICS Pipeline](#suggested-frozen-input-set-for-ics-pipeline)
-  - [When to Run the Harness](#when-to-run-the-harness)
-  - [Key Terms](#key-terms)
-  - [Next Steps](#next-steps)
-  - [Eval Harness: Built and Passing](#eval-harness-built-and-passing)
-- [References](#references)
 
 # Stage 1: Reconnaissance & Environment Mapping
 
 ## Topology
 
 I was able to create a topology of the lab after scanning the two different subnets and figuring out what systems were on each subnet. As well as which ports each system was running on.
-	![Pasted image 20260617124242.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260617124242.png)
+	![[Pasted image 20260617124242.png|585]]
 
 
 ## Understanding the ICS Chemical Process
@@ -60,7 +16,7 @@ I was able to create a topology of the lab after scanning the two different subn
 Now I will be getting into the process of the **ICS** and will explain how it works.
  
 **A Healthy Operating System**	
-![Pasted image 20260617132252.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260617132252.png)
+![[Pasted image 20260617132252.png]]
 
 The variables being displayed are units of measurement which tells the user how much of each element is moving through the pipes.
 
@@ -69,18 +25,18 @@ The unit of measurement for how much *substance* (liquid, gas, or vapor) is movi
 
 
 By taking a look at the process simulation on the HMI, I can see that a normal rate of **moles** through the **Feed 1** valve would be 500.0 **kMol/h**. 
-	![Pasted image 20260617125641.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260617125641.png)
+	![[Pasted image 20260617125641.png]]
 
 
 For the **Product** valve, it can get as low as below 10 and as high as 212.5 **kMol/h**. 
-	![Pasted image 20260617125740.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260617125740.png)
+	![[Pasted image 20260617125740.png]]
 
 This steady rate of the **Feed 1** valve makes sense since this is the valve which inputs the *A chemical* to be used, while the **Product** valve is responsible for dispensing the *finished product*. It is normal behavior for the **Product** flow valve to spike to around 212.5 **kMol/h** and drop back down to single digit numbers slowly. Inputting a chemical into the process will be much more steady than dispensing the *finished product*. 
 
 
 It is common for the valve controlling and dumping the pressure from the *Reactor vessel* to reach a max of 500 **kMol/h** very quickly and then drop down quickly to 0 **kMol/h** for a  couple of seconds. This valve only activates when the pressure is getting too high inside the *Reactor vessel* and needs to release some pressure.
-	![Pasted image 20260617125936.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260617125936.png)
-	![Pasted image 20260617125948.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260617125948.png)
+	![[Pasted image 20260617125936.png]]
+	![[Pasted image 20260617125948.png]]
 
 
 
@@ -91,7 +47,7 @@ It is common for the valve controlling and dumping the pressure from the *Reacto
 > The unit is named after the French mathematician and physicist **Blaise Pascal**
 
 For the *Reactor vessel* itself, the pressure rarely gets above 2702.2 **kPa**. When the *Reactor vessel* gets to this pressure amount, the **Purge** valve kicks in and dumps some *purged vapor byproduct* of the chemical process. 2696.2 **kPa** seems to be the lowest number for pressure I have seen the *Reactor vessel* reach.
-	![Pasted image 20260617130559.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260617130559.png)
+	![[Pasted image 20260617130559.png]]
 
 
 Lastly, for some reason the **Feed 2** valve seems to never turn on. This may be a limitation of the simulation itself, but this valve never displayed any movement or activity throughout my testing.
@@ -110,19 +66,19 @@ The sensor is not able to output any more than 100% of its range. So if a sensor
 ## Capturing Traffic from HMI
 
 Using the `arpspoof` tool in order to send packets destined for the **HMI** to Kali.
-	![Pasted image 20260617142221.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260617142221.png)
+	![[Pasted image 20260617142221.png]]
 
 
 Using the `tcpdump` tool to capture the packets that **Kali** is receiving.
-	![Pasted image 20260617142310.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260617142310.png)
+	![[Pasted image 20260617142310.png]]
 
 
 Opening the *.pcap* file containing the captured packets.
-	![Pasted image 20260617142450.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260617142450.png)
+	![[Pasted image 20260617142450.png]]
 
 
 Filtering by the *modbus* protocol
-	![Pasted image 20260617142549.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260617142549.png)
+	![[Pasted image 20260617142549.png]]
 
 
 ### Analyzing Modbus Traffic
@@ -162,7 +118,7 @@ The way that Modbus function codes work is a bit weird. So lets say that we woul
 3. The **PLC** then goes to that virtual address (the *coil*), and writes the number 1 there, in memory, 1 means on
 4. Now that the address has the value of *1* which means "on", the wiring on the **PLC** which is connected to the device, which we want to turn on, becomes energized and power flows through it to turn on that field device. 
 5. There's an **output module** sitting between the memory and the wire. The **PLC's** processor writes the *1* to memory, then the output module reads that memory location and handles the actual electrical switching on the physical terminal.
-	![Pasted image 20260618190846.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260618190846.png)
+	![[Pasted image 20260618190846.png]]
 
 The important thing to get right here is to remember that *coils* are just virtual address. Places where we can write data to in order to **change** the state or read the **state** of the field devices
 
@@ -181,7 +137,7 @@ The operator basically says, "I know the PLC's logic says this valve should be c
 Lets get back to what we see actually in the lab now. So I noticed the **HMI** is polling the **PLC** on **FC1 & 4**, and it does this 2 times every single second. 
 
 
-![Pasted image 20260618193741.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260618193741.png)
+![[Pasted image 20260618193741.png]]
 Looking at this packet we can see that there are 13 *registers*. What are *Registers*? *Registers* are a memory location on the **PLC** which stores data from a *field device*. So for example, the **HMI** says, "send me the registers 0-12 all at once", and since we know that *registers* hold the different data points from the process, we know that this really means, send me all the data from the 13 *field devices*.
 
 Each *register* is mapped to a specific field device. Some field devices might need to use 2 registers, the reason for this is because a *register* has a maximum value of an **16 BIT UNSIGNED INTEGER**, which is 65535. So, if a field device needs to store a number higher than this number, it would make use of 2 *registers*. The maximum number of *registers* that can be in a **Modbus** packet is ==125==.
@@ -198,15 +154,15 @@ Engineering value = 44.2 kPa
 
 **Figuring out the register readings**
 I took a look at the registers from the packets and upon inspection I saw that register 0 & 1 were at a max value of 65535. I was confused as to what this value represented according to the process so the way I think I figured it out was to turn on the process and see if it changed.
-	![Pasted image 20260619181617.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260619181617.png)
+	![[Pasted image 20260619181617.png]]
 
 
 
 Before turning off the process, I noticed that the only thing running at maximum capacity was the valve for *Chemical A* (my assumption) . This valve was,  and does run at 100 percent. So I figured that maybe these 2 registers were to represent that valve. So I went and turned off the entire system from the **HMI** and turned it back on after a couple of seconds.
-	![Pasted image 20260619181947.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260619181947.png)
+	![[Pasted image 20260619181947.png]]
 
 I then looked at a packet coming from **AFTER** turning off the process and inspected registers 0 & 1. And what do you know, those both showed the value of 0. 
-	![Pasted image 20260619181711.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260619181711.png)
+	![[Pasted image 20260619181711.png]]
 
 This does not exactly prove to me that these *Registers* hold the data from from *Chemical A*'s valve, but this is my best guess.
 
@@ -217,7 +173,7 @@ Something that I found which gives more credit to my assumption is when I turn o
 My explanation of the *registers* is this. A register holds the raw *count* (0-65535), and this raw count is then divided by 65535 (the max the **UINT16** can hold), in order to figure out the **percentage**. An example is, lets say *register* 1 has a value of 32768 (roughly half the value of the max, 65535).  The register value is literally half of the max it could be, so we know that the percentage is 50%. Now if we take all these values and plug them into the *linear scaling* formula, we can then find the **engineering** value.
 
 
-> [!NOTE] A register holds a *raw* count (0–65535); dividing by the full-scale max (65535 for UINT16) expresses it as a fraction, ×100 for a percentage; and feeding that fraction together with the device's *calibrated* min and max into the *linear scaling* formula yields the engineering value.
+> [!info] A register holds a *raw* count (0–65535); dividing by the full-scale max (65535 for UINT16) expresses it as a fraction, ×100 for a percentage; and feeding that fraction together with the device's *calibrated* min and max into the *linear scaling* formula yields the engineering value.
 
 
 
@@ -234,7 +190,7 @@ I think *registers* 4 & 5 are the **purge** valve and *registers* 6 & 7 are the 
 
 As I waited, i noticed the **Product** valve slowly dwindling down in value on the sensor reading, and  as the later packets came, the **product** valve slowly went to 0, meaning that the openness of the valve and the **product** flowing through slowly declined. I saw this in the packets. The later packets that came eventually stopped showing a high value for *register* 6 & 7 and instead showed 0. And when looking at the physical simulation, the **Product** valve sensor was now displaying 0. 
 
-![Pasted image 20260620154158.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260620154158.png)
+![[Pasted image 20260620154158.png]]
 
 This is my assumption as to which **field device** stores their data in which register. I think that the registers 4 & 5 belong to the **Purge Process**, and I think that  *register* 6 & 7 belong to the **Product Process**.
 
@@ -247,29 +203,29 @@ So one *register* is holding the value of how open the valve is while the other 
 
 
 I'm thinking Register 8 is the reactor pressure. I turned of the system for a while and watched the packets as the pressure decreased slowly, and register 8 is the only register which has a dramatic decrease over time.
-![Pasted image 20260622162734.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260622162734.png)
+![[Pasted image 20260622162734.png]]
 
 > It is hard to see but it goes from 38564 -> 9463 -> 6521. Obviously the gap from 38564 and 9463 is because it how many packets later I looked for the value but the point stands.
 
 
 
 **A clearer transformation**
-	![Pasted image 20260622163637.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260622163637.png)
-	![Pasted image 20260622163645.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260622163645.png)
-	![Pasted image 20260622163654.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260622163654.png)
+	![[Pasted image 20260622163637.png]]
+	![[Pasted image 20260622163645.png]]
+	![[Pasted image 20260622163654.png]]
 
 
 
 Then when I turn the process back on, *register* 8 slowly goes back up.
-	![Pasted image 20260622162957.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260622162957.png)
-	![Pasted image 20260622163009.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260622163009.png)
-	![Pasted image 20260622163039.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260622163039.png)
+	![[Pasted image 20260622162957.png]]
+	![[Pasted image 20260622163009.png]]
+	![[Pasted image 20260622163039.png]]
 
 
 
 Something to note is the other *registers*, 9, 10, 11, & 12, ALL seem to just hover around the same numerical value with no big swings. To show this here are 2 packets, one if from the set of 7000+ packets, and another is from 9000+, so these packets are roughly 2000+ packets apart. And here is the numerical difference 
-	![Pasted image 20260622163340.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260622163340.png)
-	![Pasted image 20260622163353.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260622163353.png)
+	![[Pasted image 20260622163340.png]]
+	![[Pasted image 20260622163353.png]]
 
 #### Organizing The Register Map
 
@@ -293,7 +249,7 @@ Register 8 = **Reactor Pressure**
 
 ## Wireshark arpspoof Attack
 
-> [!NOTE] A note on interface names: everywhere in Stage 3 you'll see `-i eth0`, this is the network interface **on the Kali attacker VM**, the one Kali uses to reach the lab subnets. It has nothing to do with `eno1`, which shows up starting in Stage 4, that's the **host machine's** physical NIC, used for the Suricata macvlan setup. Two different machines, two different interfaces, same-looking name.
+> [!info] A note on interface names: everywhere in Stage 3 you'll see `-i eth0`, this is the network interface **on the Kali attacker VM**, the one Kali uses to reach the lab subnets. It has nothing to do with `eno1`, which shows up starting in Stage 4, that's the **host machine's** physical NIC, used for the Suricata macvlan setup. Two different machines, two different interfaces, same-looking name.
 
 Blew up the reactor by disabling the "**Chemical Reactor**"program on **Open PLC**. I found out how to access the **OpenPLC web portal** by using the command 
 
@@ -302,17 +258,17 @@ sudo arpspoof -i eth0 192.168.90.107
 ```
 
 Which sent all the traffic destined for the HMI to my Kali linux machine. This way I was able to use Wireshark and sniff the packets and figure out that one of the ICS devices with an IP address of `192.168.95.2` was making a lot of traffic.
-	![Pasted image 20260610182115.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260610182115.png)
-	![Pasted image 20260610182138.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260610182138.png)
-	![Pasted image 20260610182159.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260610182159.png)
+	![[Pasted image 20260610182115.png]]
+	![[Pasted image 20260610182138.png]]
+	![[Pasted image 20260610182159.png]]
 I then used Nmap to scan that device IP address and found an open port of 8080, by combining the IP and port together I was able to find the web portal login for OpenPLC.
-	![Pasted image 20260610182349.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260610182349.png)
+	![[Pasted image 20260610182349.png]]
 
 `192.168.95.2:8080`
 
 From here I just used the documented default OpenPLC credentials (`openplc`/`openplc`) and logged into the portal. I then navigated to the system programs and shutdown the "**Chemical reactor**" program which then caused the pressure in the reactor to build and eventually **blow it up**.
-	![Pasted image 20260610182602.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260610182602.png)
-	![Pasted image 20260610182635.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260610182635.png)
+	![[Pasted image 20260610182602.png]]
+	![[Pasted image 20260610182635.png]]
 
 
 
@@ -354,7 +310,7 @@ sudo arpspoof -i eth0 -t 192.168.90.200 192.168.90.107
 
 Same flags, but now `-t` the router and impersonate the HMI, poisoning the _router's_ table so replies headed to the HMI come through Kali too. Bidirectional position established.
 
-![Pasted image 20260624180922.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260624180922.png)
+![[Pasted image 20260624180922.png]]
 
 
 With both these *arpspoof* commands running, the **HMI**'s ARP table is now poisoned as well as the routers. We can now see the request for information from the **HMI** and the response from the **PLC**.
@@ -364,7 +320,7 @@ After this, I ran the python script with the following command. This script inte
 ```
 sudo python3 /root/modbus_mitm_conceal.py
 ```
-![Pasted image 20260624181320.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260624181320.png)
+![[Pasted image 20260624181320.png]]
 
 The Script File
 [modbus_mitm_conceal.py](modbus_mitm_conceal.py)
@@ -388,7 +344,7 @@ sudo iptables -I FORWARD -p tcp --sport 502 -j NFQUEUE --queue-num 1
 
 This **intercepts and holds** packets (unlike Wireshark, which only copies), which is necessary because to modify a packet you must stop the real one, edit it, then release it.
 
->[!NOTE] A **chain** is an ordered list of firewall rules a packet is checked against. The **FORWARD chain** handles packets that are merely _passing through_ the machine (not to it, not from it). Because ARP spoofing makes HMI↔PLC traffic transit Kali on its way to its real destination, that traffic hits the FORWARD chain, which is why the interception rule is inserted there.
+>[!info] A **chain** is an ordered list of firewall rules a packet is checked against. The **FORWARD chain** handles packets that are merely _passing through_ the machine (not to it, not from it). Because ARP spoofing makes HMI↔PLC traffic transit Kali on its way to its real destination, that traffic hits the FORWARD chain, which is why the interception rule is inserted there.
 
 
 
@@ -429,12 +385,12 @@ With the *-D* flag, we are removing the rule we previously put in place which to
 
 
 Before
-	![Pasted image 20260624181357.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260624181357.png)
-	![Pasted image 20260624181428.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260624181428.png)
+	![[Pasted image 20260624181357.png]]
+	![[Pasted image 20260624181428.png]]
 
 After 
-	![Pasted image 20260624181506.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260624181506.png)
-	![Pasted image 20260624181518.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260624181518.png)
+	![[Pasted image 20260624181506.png]]
+	![[Pasted image 20260624181518.png]]
 
 
 As you can see, the script makes it seem like the process is melting down, when in reality, everything is working just fine. I changed the value of register 8 with a max value of 65535 and this triggered the **HMI** to show cautions all over the process.
@@ -513,7 +469,7 @@ python3 -c "from pymodbus.client import ModbusTcpClient; c=ModbusTcpClient('192.
 
 
 
-![Pasted image 20260624193728.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260624193728.png)
+![[Pasted image 20260624193728.png]]
 
 From running the command, we see almost every single *coil* is off. However, if you look closely, *coil* 40 shows True. My hypothesis is that this *coil* is the *Chemical A* process, because as I discovered earlier in my documentation, the *Chemical A* process is always on.
 
@@ -542,14 +498,14 @@ To restore the process, all I did was tweak the command section where it says "F
 ### Result
 
 Before manipulating the coil
-	![Pasted image 20260624200214.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260624200214.png)
-	![Pasted image 20260624200256.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260624200256.png)
+	![[Pasted image 20260624200214.png]]
+	![[Pasted image 20260624200256.png]]
 
 
 After Manipulating the Coil
-	![Pasted image 20260624200457.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260624200457.png)
-	![Pasted image 20260624200337.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260624200337.png)
-	![Pasted image 20260624200358.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260624200358.png)
+	![[Pasted image 20260624200457.png]]
+	![[Pasted image 20260624200337.png]]
+	![[Pasted image 20260624200358.png]]
 
 
 As we can see, after sending the malicious packet, the **PLC** takes it and runs the command with no second thoughts, because of there being no authentication on **modbus**, and my hypothesis was correct. *Coil* 40 is indeed responsible for the *Chemical A* process, when the command was sent the process was stopped and the **HMI** view also showed 0% for **Feed 1**.
@@ -559,13 +515,13 @@ In order to restore the process, I ran the tweaked command I mentioned earlier, 
 ``` python
 python3 -c "from pymodbus.client import ModbusTcpClient; c=ModbusTcpClient('192.168.95.2',port=502); c.connect(); r=c.write_coil(40,True); print('Write result:', 'OK' if not r.isError() else r); c.close()"
 ```
-![Pasted image 20260624200854.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260624200854.png)
+![[Pasted image 20260624200854.png]]
 
 
 And as expected, the *Chemical A* process turns on once again to 100% and the process is back to normal.
 
 
->[!NOTE] **Detection note:** In normal operation, coils are flipped internally by the PLC's own logic. FC5 write commands don't traverse the network. So an FC5 "Write Single Coil" arriving from an unauthorized IP (here, Kali at 192.168.90.6) is a high-fidelity attack indicator. This is the basis for a Stage 4 Suricata rule: alert on any Modbus FC5/FC15 write from a source that isn't the legitimate controller
+>[!info] **Detection note:** In normal operation, coils are flipped internally by the PLC's own logic. FC5 write commands don't traverse the network. So an FC5 "Write Single Coil" arriving from an unauthorized IP (here, Kali at 192.168.90.6) is a high-fidelity attack indicator. This is the basis for a Stage 4 Suricata rule: alert on any Modbus FC5/FC15 write from a source that isn't the legitimate controller
 
 
 
@@ -711,16 +667,16 @@ control := scale_to_uint(real_in:= valve_pos_limited);
 
 ``` 
 
-![Pasted image 20260625180138.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260625180138.png)
+![[Pasted image 20260625180138.png]]
 
 
 From here, we can see that there are multiple variables which gather different data points for the code to actually work. Lets say that the current pressure of the reactor is at 3000 **kPa**, but the *setpoint* in our code says it should be 2700 **kPa**. This means that we are above our *setpoint* by +300. This is where the variable`pos_update_real` comes into play.
 
 This variable subtracts the *setpoint* of 2700 **kPa** from our current pressure of 3000 **kPa**. It then multiplies that output by *k*, and from looking at the *main1* file, we know that the *k* for purge is **-20.0**.
 
-> [!NOTE] The real function scales the raw register values to engineering units first via `scale_to_real`; I'm using the engineering values directly here to keep the math readable.
+> [!Note] The real function scales the raw register values to engineering units first via `scale_to_real`; I'm using the engineering values directly here to keep the math readable.
 
-![Pasted image 20260625180620.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260625180620.png)
+![[Pasted image 20260625180620.png]]
 
 `pos_update_real := (2700 - 3000) * -20.0`
 
@@ -738,7 +694,7 @@ If the valve were already at **80%** and you got a small negative update of **�
 
 Now think of our **6000** number, if the valve was at **80%**, this **6000** number would fully and rapidly open the valve, pegging it at 100% once `LIMIT` clamps the result. What is `LIMIT`, well this is a built-in **ST** function that *clamps* a value so it can never fall outside a defined range.
 
-> [!NOTE] It takes three arguments in the form `LIMIT(min, value, max)`: if the value is below the minimum, it returns the minimum; if it's above the maximum, it returns the maximum; otherwise it returns the value unchanged. In our case, the valve position runs through `LIMIT(0.0, valve_pos_real + pos_update_real, 100.0)`. This takes the valve's current position, adds our update to it (`80 + 6000 = 6080`), and then clamps that result between 0 and 100. Since 6080 is far above the maximum of 100, `LIMIT` returns 100, fully open. This is exactly why a massive update like 6000 doesn't break anything: the valve can't physically open beyond 100%, and `LIMIT` enforces that ceiling, catching the overshoot and capping it at fully open. The same protection works on the low end too: if the math ever produced a large negative result, `LIMIT` would floor it at 0 rather than letting the valve go to an impossible negative position.
+> [!info] It takes three arguments in the form `LIMIT(min, value, max)`: if the value is below the minimum, it returns the minimum; if it's above the maximum, it returns the maximum; otherwise it returns the value unchanged. In our case, the valve position runs through `LIMIT(0.0, valve_pos_real + pos_update_real, 100.0)`. This takes the valve's current position, adds our update to it (`80 + 6000 = 6080`), and then clamps that result between 0 and 100. Since 6080 is far above the maximum of 100, `LIMIT` returns 100, fully open. This is exactly why a massive update like 6000 doesn't break anything: the valve can't physically open beyond 100%, and `LIMIT` enforces that ceiling, catching the overshoot and capping it at fully open. The same protection works on the low end too: if the math ever produced a large negative result, `LIMIT` would floor it at 0 rather than letting the valve go to an impossible negative position.
 
 
 ### Wrong Value of K
@@ -768,15 +724,15 @@ So, we know that our *current* pressure is higher than our *setpoint* which is u
 
 By now anyone could see how our attack is most likely going to work. It is very simple. We will change the value of *k* from being *negative* to being *positive*, this will ensure that no pressure would be able to escape the reactor.
 
-> [!WARNING] I identified that inverting the purge valve's gain sign (−20 → +20) would defeat the pressure-relief control loop, since the corrective math would close the valve precisely when pressure exceeded setpoint. Critically, the GRFICS control program contains no safeguard against this: the `LIMIT` clamps bound values but not control direction, and there is no logic-integrity check. In a real facility, this class of attack is mitigated not by the control PLC itself but by independent layers: Safety Instrumented Systems, mechanical relief devices, and program-change detection. This demonstrates why ICS defense-in-depth never relies on the control logic to police itself
+> [!warning] I identified that inverting the purge valve's gain sign (−20 → +20) would defeat the pressure-relief control loop, since the corrective math would close the valve precisely when pressure exceeded setpoint. Critically, the GRFICS control program contains no safeguard against this: the `LIMIT` clamps bound values but not control direction, and there is no logic-integrity check. In a real facility, this class of attack is mitigated not by the control PLC itself but by independent layers: Safety Instrumented Systems, mechanical relief devices, and program-change detection. This demonstrates why ICS defense-in-depth never relies on the control logic to police itself
 
 
 Now I am on the **EWS** looking at the application OpenPLC editor, I currently have a program open that was already on this system and I am editing the *k* value.
-	![Pasted image 20260626183636.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260626183636.png)
+	![[Pasted image 20260626183636.png]]
 
 
 We already know somewhat of how the logic in this program works from the previous dive into why the value of *k* matters. So I will just show me changing the value to positive.
-	![Pasted image 20260626183748.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260626183748.png)
+	![[Pasted image 20260626183748.png]]
 
 
 Once you make any changes to the program in OpenPLC editor, you have to hit the "*Generate Program for OpenPLC runtime*", doing this is critical because it compiles the entire program and ensures that everything is working. 
@@ -786,7 +742,7 @@ Once you make any changes to the program in OpenPLC editor, you have to hit the 
 After hitting this button, it will ask for a name, then a location. The name should be *plc.st*, the .st is important and NEEDS to be added. *.st* files are the ones which we upload to the OpenPLC website.
 
 I named mine the same as the previous which is just *plc.st* and replaced the old. The directory was `engineer/Desktop/chemical (copy 1)/ build`. 
-	![Pasted image 20260626184141.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260626184141.png)
+	![[Pasted image 20260626184141.png]]
 Now everything in this folder is updated with the change so we can proceed to uploading the malicious program.
 
 
@@ -795,13 +751,13 @@ The current running program is "*Chemical Reactor*" on the OpenPLC website. I am
 OpenPLC is at `192.168.95.2:8080`
 
 From here, I navigate to 'Programs' and browse, then select my malicious program (*"chemical"*. 
-	![Pasted image 20260625185416.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260625185416.png)
+	![[Pasted image 20260625185416.png]]
 
 Looking at the 'chemical' folder, which is my program, I open it and see these options
-	![Pasted image 20260625185226.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260625185226.png)
+	![[Pasted image 20260625185226.png]]
 
 I then chose 'build' and see these options.
-	![Pasted image 20260625185241.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260625185241.png)
+	![[Pasted image 20260625185241.png]]
 
 I finally chose *plc.st*. Here is the reasoning.
 
@@ -819,30 +775,30 @@ So: **`plc.st`** is the runtime program. That's what gets loaded onto the PLC.
 
 
 I now am going to hit "*Upload Program*" to upload my malicious program.
-![Pasted image 20260625185653.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260625185653.png)
+![[Pasted image 20260625185653.png]]
 
 
 
-![Pasted image 20260626185715.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260626185715.png)
-![Pasted image 20260626185739.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260626185739.png)
+![[Pasted image 20260626185715.png]]
+![[Pasted image 20260626185739.png]]
 When you upload the `.st` to OpenPLC **Runtime**, the Runtime does its _own, second_ compile, it takes the `.st` and compiles it into **C code, then into a native executable** the PLC actually runs. This is a separate compilation, happening on the Runtime side, in a different environment.
 
 
 My new program is now on the list with the others. All that is left to do is run it.
-	![Pasted image 20260626185927.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260626185927.png)
+	![[Pasted image 20260626185927.png]]
 
 
-![Pasted image 20260626190006.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260626190006.png)
+![[Pasted image 20260626190006.png]]
 The program I edited is now running.
 
 
 
 ### The Result
 
-![Pasted image 20260626183457.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260626183457.png)
+![[Pasted image 20260626183457.png]]
 
 
-![Pasted image 20260626183503.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260626183503.png)
+![[Pasted image 20260626183503.png]]
 
 As we can see, by simply changing the value of *k* from a negative to a positive, the logic now works in the reverse . The **purge** valve does not open when *current* pressure is above *setpoint* pressure, instead it fully closes and holds all the pressure inside.
 
@@ -852,7 +808,7 @@ Not allowing new programs to be uploaded unless verified, firewall rules which c
 
 
 Something interesting that I found which would've been pretty useful had I put the pieces together earlier, was a full list of the slave devices and their addresses.
-	![Pasted image 20260627103141.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260627103141.png)
+	![[Pasted image 20260627103141.png]]
 
 As we know OpenPLC is acting as a *Modbus Master* to the 6 slave devices. Each device has it's data mapped into specific OpenPLC addresses. This chart is the *I/O* mapping, input and output. It states which devices data lives at which address.
 
@@ -916,7 +872,7 @@ So for *Feed 1*:
 The reason that the command output or *%QW100-%QW100* is just a single value, not an actual range as the *%IW100-%IW101*, is because the **PLC** needs 2 sensor readings, the current valve position and the current flow rate, with this information, the **PLC** then can tell the valve to increase or decrease the valve position. This single piece of info that the **PLC** tells the *Field Device* can be done in one command,  **valve setpoint**.
 
 
->[!NOTE] The IEC address encodes everything: `%` + direction (`I`=in/`Q`=out) + size (`X`=bit/`W`=word) + number. So `%IW100` = analog sensor reading #100 coming in; `%QW100` = analog command #100 going out. This process uses only word-sized (analog) I/O (no discrete bits), confirming it's a fully analog, modulating-valve process, which is why register manipulation (not coil toggling) is the real attack surface.
+>[!info] The IEC address encodes everything: `%` + direction (`I`=in/`Q`=out) + size (`X`=bit/`W`=word) + number. So `%IW100` = analog sensor reading #100 coming in; `%QW100` = analog command #100 going out. This process uses only word-sized (analog) I/O (no discrete bits), confirming it's a fully analog, modulating-valve process, which is why register manipulation (not coil toggling) is the real attack surface.
 
 
 
@@ -951,11 +907,11 @@ The overview is this. I am going to *arpspoof* both the **HMI** and the **router
 
 
 1st Spoof
-	![Pasted image 20260627115033.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260627115033.png)
+	![[Pasted image 20260627115033.png]]
 
 
 2nd Spoof
-	![Pasted image 20260627115115.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260627115115.png)
+	![[Pasted image 20260627115115.png]]
 
 
 I *arpspoofed* both endpoints, the **HMI** and the **router** in order to capture the packet being send to the **PLC** and the response back. Technically I do not need to *arpspoof*the router since all I need is the **HMI**s 'off' packet, but I did just to engrave this into memory.
@@ -964,11 +920,11 @@ I *arpspoofed* both endpoints, the **HMI** and the **router** in order to captur
 Now that these endpoints are both spoofed and I can see the packets traversing the network, time to capture the **FC5** packet.
 
 I set up a filter in WireShark in order to only capture **FC5** packets. I am listening to the packets on the interface used in my *arpspoof* command from earlier, interface *eth0*.
-	![Pasted image 20260627115857.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260627115857.png)
+	![[Pasted image 20260627115857.png]]
 
 
 I am now going to turn off the process from the **HMI** located at `192.168.90.107` and we will see the **FC5** packet in WireShark.
-	![Pasted image 20260627120052.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260627120052.png)
+	![[Pasted image 20260627120052.png]]
 
 We know have what we need to complete the attack. The process is back on. I then saved this .pcap file to my machine and named it *replayAttack.pcapng*. I had to convert this file from .pcapng to pcap in order for `tcpreplay` to use it. Using this command in the directory of the file
 ```
@@ -976,13 +932,13 @@ editcap replayAttack.pcapng replayAttack.pcap
 ```
 
 
-> [!NOTE] An **FC5** packet has a byte value inside of it, if the **FC5** is a "turn off" command, the byte value would be *0000*, if it was a "turn on" command, the byte value would be *ff00*, as shown below.
+> [!info] An **FC5** packet has a byte value inside of it, if the **FC5** is a "turn off" command, the byte value would be *0000*, if it was a "turn on" command, the byte value would be *ff00*, as shown below.
 
 Off
-	![Pasted image 20260627120526.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260627120526.png)
+	![[Pasted image 20260627120526.png]]
 
 On
-	![Pasted image 20260627120540.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260627120540.png)
+	![[Pasted image 20260627120540.png]]
 
 
 ### Replaying The Packet (Method A)
@@ -1026,12 +982,12 @@ sudo tcpreplay -i eth0 replayAttack.pcap
 
 
 Before
-	![Pasted image 20260627121946.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260627121946.png)
+	![[Pasted image 20260627121946.png]]
 
 
 After
-	![Pasted image 20260627123957.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260627123957.png)
-	![Pasted image 20260627124015.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260627124015.png)
+	![[Pasted image 20260627123957.png]]
+	![[Pasted image 20260627124015.png]]
 
 As you can see, it did not work. This is a lesson though and something to take note of. As mentioned earlier, TCP has its own built in defense against replay attacks. The PLC's TCP stack receives a packet with sequence numbers that don't match any active connection so the **PLC TCP** stack  drops the packet.
 
@@ -1039,7 +995,7 @@ You can also see from my screenshot of the terminal that I am getting a lot of e
 
 
 
->[!NOTE] Raw replay via **tcpreplay** proved impractical for three reasons: **(1)** it replays the entire pcap indiscriminately, flooding the network with hundreds of irrelevant captured packets rather than the single target command; **(2)** capture artifacts from NIC offloading (oversized logical packets exceeding the 1500-byte MTU) failed to transmit; and **(3)** even successfully transmitted packets carried stale TCP sequence numbers the PLC rejected. This motivated an application-layer replay (Method B), which surgically re-sends only the captured Modbus payload over a fresh, valid TCP connection.
+>[!Note] Raw replay via **tcpreplay** proved impractical for three reasons: **(1)** it replays the entire pcap indiscriminately, flooding the network with hundreds of irrelevant captured packets rather than the single target command; **(2)** capture artifacts from NIC offloading (oversized logical packets exceeding the 1500-byte MTU) failed to transmit; and **(3)** even successfully transmitted packets carried stale TCP sequence numbers the PLC rejected. This motivated an application-layer replay (Method B), which surgically re-sends only the captured Modbus payload over a fresh, valid TCP connection.
 
 
 
@@ -1105,14 +1061,14 @@ s.close()
 - **`s.close()`**: closes the TCP connection cleanly, freeing the socket.
 
 Running the command
-	![Pasted image 20260627131118.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260627131118.png)
+	![[Pasted image 20260627131118.png]]
 
 
 
 ### The Result
 
-![Pasted image 20260627131109.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260627131109.png)
-![Pasted image 20260627131129.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260627131129.png)
+![[Pasted image 20260627131109.png]]
+![[Pasted image 20260627131129.png]]
 
 
 As we can see, the *Chemical A process* valve is turned off. In order to reverse this, I can do the same exact process but with the "on" **FC5** packet I captured earlier as well.
@@ -1153,7 +1109,7 @@ Something I didn't explain earlier was there are 2 types of *registers*. **Holdi
 A **holding register** is writable on the other hand, a **holding register** can express a range or a degree, for example, "valve a is 50% open", this value is held in a **holding register**. If I was to change the value of that number in that *register* to lets say  65535, the valve would be 100% open (**assuming the scaling is 0-65535**). This is true because if we think back to my earlier documentation, these *registers* are 16 bit numbers (0-65535).
 
 Here is a visual to help grasp the concept of **holding register**, **input registers**, **coils**, and **discrete inputs**.
-	![Pasted image 20260703185922.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260703185922.png)
+	![[Pasted image 20260703185922.png]]
 
 The four boxes are four separate storage areas inside the PLC. Two hold single bits (Coils, Discrete Inputs), two hold 16-bit words (Input Registers, Holding Registers). My coil attack hit the top-left box. My pressure mapping was the bottom-left box. This attack targets the **bottom-right box**.
 
@@ -1162,7 +1118,7 @@ Holding *registers* are rarely seen on the wire (the **HMI** mostly polls input 
 The [Coil Manipulation Attack](#coil-manipulation-attack) that I did, was on the *Chemical A* process. Now this process specifically, is controlled by a **coil**, on or off. BUT, the **purge valve** is controlled by a *register*. Its not confined to being just open or just closed, it can be in between. This is a key concept to understand.
 
 
-> [!NOTE] Depending on the **field device**, *coils* or *registers* will be used to control the device. For example, the *Chemical A* process in this simulation is controlled by a *coil (on or off)*, while the *purge valve* is controlled by a *register* because it's a *modulating* valve, its position is a value anywhere from fully closed to fully open, not just on/off.. Something do take into account is that a process can be controlled by **BOTH** registers and coils if need be.
+> [!info] Depending on the **field device**, *coils* or *registers* will be used to control the device. For example, the *Chemical A* process in this simulation is controlled by a *coil (on or off)*, while the *purge valve* is controlled by a *register* because it's a *modulating* valve, its position is a value anywhere from fully closed to fully open, not just on/off.. Something do take into account is that a process can be controlled by **BOTH** registers and coils if need be.
 
 
 ### Capturing Holding Register Traffic
@@ -1191,16 +1147,16 @@ python3 -c "from pymodbus.client import ModbusTcpClient; c=ModbusTcpClient('192.
 - `c.close()` - close cleanly.
 
 I can see that most of the *holding registers* are 0, but there are some that have a value above 0.
-	![Pasted image 20260703193923.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260703193923.png)
+	![[Pasted image 20260703193923.png]]
 
 
 Now lets check WireShark
-	![Pasted image 20260703194056.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260703194056.png)
+	![[Pasted image 20260703194056.png]]
 There it is! A packet containing the *holding registers*. Lets dissect the packet.
 
 
 I see that there are *registers* 0-124. Again, some with value others with no value.
-	![Pasted image 20260703194151.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260703194151.png)
+	![[Pasted image 20260703194151.png]]
 
 ### Dissecting The Registers
 
@@ -1208,7 +1164,7 @@ I see that there are *registers* 0-124. Again, some with value others with no va
 I was wondering why there was so many *registers*. The reason is because most of them are unused, they're just there in case they need to become of use. It is not a list of active devices. Also, the reason why we see so many at once in this packet is because my command specified to get all 125 *registers*, I could've asked for 10 if I wanted to.
 
 Since *registers* 100 and 103 are the only ones with values, I am going to run a new scan which only scans for those, and does it 10 times right after each scan. Just to see how these behave while the process is running.
-	![Pasted image 20260703200019.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260703200019.png)
+	![[Pasted image 20260703200019.png]]
 
 The command used is
 ```
@@ -1286,7 +1242,7 @@ c.close()
 
 
 OUTPUT
-![Pasted image 20260706191509.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260706191509.png)
+![[Pasted image 20260706191509.png]]
 
 When correlating the the physical process itself with the output from the terminal, I noticed that as the **purge valve** was going down, the *register* 102 would go down as well, and eventually when the **purge valve** was at 0, *register* 102 would not longer show up in the terminal anymore. Then, when the **purge valve** would increase, I saw *register* 102 pop up in the terminal output again. This leads me to believe that *register* 102 is the **purge valve**. 
 
@@ -1327,12 +1283,12 @@ except KeyboardInterrupt:
     c.close()
 "
 ```
-![Pasted image 20260706204946.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260706204946.png)
+![[Pasted image 20260706204946.png]]
 
 
 
 I ran the hammer in one terminal and a monitor in another, reading pressure (108) and the purge valve (102) side by side. The monitor showed purge = 1 for about 30 straight reads, roughly 15 seconds unbroken. **I won the write-race and pinned the purge valve command to closed.** Beating the **PLC**'s constant scan-and-recompute is the thing I set out to do, and the steady stream of 1's proved I did it.
-	![Pasted image 20260706205048.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260706205048.png)
+	![[Pasted image 20260706205048.png]]
 
 
 
@@ -1365,7 +1321,7 @@ This also explains the difference between this attack and my earlier [Injected S
 
 The most important takeaway for the defense side of this project is that even though my writes never moved the valve, **every one of them was still detected.** Once *Suricata* was running live, the hammer threw hundreds of rule 1000002 alerts. An unauthorized **FC6** write is malicious traffic whether or not it succeeds, and a good IDS flags the _attempt_. A defender never gets to assume an attacker's writes will fail, so detecting the attempt is the right way to go about it. That is the point of Stage 4, and this attack confirmed the rule works.
 
-> [!NOTE] Open thread  
+> [!note] Open thread  
 > Getting a real physical pressure change is still possible, most likely by attacking the product valve (register 103), which draws mass out of the reactor, rather than the purge valve. Closing product draw should trap mass and raise pressure. I am leaving this as a future experiment and moving on to build out the rest of my detection rules, since the detection goal for this attack is already met.
 
 
@@ -1426,7 +1382,7 @@ docker network inspect <NETWORK_NAME_OR_ID>
 
 
 After inspecting the networks that *GRFICSv3* created and the IPs inside them, I realize that two of the critical networks are running on a **macvlan**
-	![Pasted image 20260629201332.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260629201332.png)
+	![[Pasted image 20260629201332.png]]
 
 This is going to be trouble, and I will explain why. A normal docker _bridge_ works like a switch sitting on your host. The traffic between each container physically passes through a virtual interface on the host, so _Suricata_ running on the host would be able to see that traffic.
 
@@ -1435,7 +1391,7 @@ This is going to be trouble, and I will explain why. A normal docker _bridge_ wo
 
 
 Because of this, the host itself cannot talk to or see its own **macvlan** container traffic through the normal stack. **Macvlan** purposely isolates the parent host from the **macvlan** interfaces. This is why running `ip link show type bridge` only showed me the admin bridge and not the ICS or DMZ networks. There simply is no bridge interface for them to watch.
-	![Pasted image 20260629202111.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260629202111.png)
+	![[Pasted image 20260629202111.png]]
 To wrap this all up in a nice gift box with a bow, the **Modbus** traffic that I want to inspect is flowing over a physical interface (in my case `eno1`) at the MAC layer, but my host's normal view can't pick it cleanly off a tidy bridge device.
 
 
@@ -1456,7 +1412,7 @@ sudo apt update && sudo apt install suricata -y
 
 
 Now after that finishes, it is time to configure it. Really quick its good to make sure that the interface is up and running and its the exact name *Suricata* will expect.
-	![Pasted image 20260629210629.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260629210629.png)
+	![[Pasted image 20260629210629.png]]
 It's up an running all good.
 
 
@@ -1481,7 +1437,7 @@ Now I will go into the config file and change the network to the values that the
 ```
 sudo nano /etc/suricata/suricata.yaml
 ```
-![Pasted image 20260629211743.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260629211743.png)
+![[Pasted image 20260629211743.png]]
 
 Breaking down what I see here this is what it all means in the `vars` group.
 - `vars`: a section for variables *Suricata* reuses across rules. Define a value once here, reference it everywhere.
@@ -1490,7 +1446,7 @@ Breaking down what I see here this is what it all means in the `vars` group.
 - `EXTERNAL_NET`: defined as `!$HOME_NET`, where `!` means "not." So external is literally "everything that isn't home." This is what lets a rule say "alert when something from **EXTERNAL_NET** writes to my **PLC**": *Suricata* computes that as "anything not in **HOME_NET**."
 
 I then changed what the `HOME_NET` value was, I put it as the subnet from the *GRFICSv3* simulation
-	![Pasted image 20260629212203.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260629212203.png)
+	![[Pasted image 20260629212203.png]]
 
 
 `192.168.95.0/24` - the *ICS* network, where the **PLC** lives at `.2`
@@ -1529,7 +1485,7 @@ alert   tcp  $EXTERNAL_NET any -> $HOME_NET 502   (msg:"..."; sid:1000001; rev:1
 - **options**: everything in the parentheses: the human-readable message (`msg`), the unique rule ID (`sid`), the revision number (`rev`), and the actual matching logic (like "Modbus function code equals 5").
 
 
-> [!NOTE] A *ruleset* is just thousands of these lines stacked up. Something important to understand is that *Suricata* operates on **two layers**.
+> [!info] A *ruleset* is just thousands of these lines stacked up. Something important to understand is that *Suricata* operates on **two layers**.
 > **Layer 1** is *community rules* you download and manage with a tool.  
 **Layer 2** is *custom rules* you author by hand.
 
@@ -1550,7 +1506,7 @@ Running the command `suricata-update` pulls newly minted or updated rules from a
 
 It is just like how `apt` fetches and updates software, but `suricata-update` fetches and updates rule files.
 
-> [!WARNING] When you want newer signatures, you run `suricata-update` again, it re-downloads, and it _replaces_ the consolidated file with a fresh version. Anything in there is disposable because it can always be re-fetched.
+> [!warning] When you want newer signatures, you run `suricata-update` again, it re-downloads, and it _replaces_ the consolidated file with a fresh version. Anything in there is disposable because it can always be re-fetched.
 
 
 ### Layer 2 Explanation
@@ -1581,13 +1537,13 @@ sudo suricata-update
 
 `suricata-update`: the rule-manager tool we just discussed. Run with no arguments, it does its default behavior: fetch the Emerging Threats Open ruleset, process it, and merge it into `/var/lib/suricata/rules/suricata.rules`.
 
-![Pasted image 20260629220845.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260629220845.png)
+![[Pasted image 20260629220845.png]]
 
 This update automatically disabled rules for **Modbus** as you can see in the picture, we need to enable that so we do not run into any errors.
 
 
 To enable **Modbus** detection, I went into the config file `/etc/suricata/suricata.yaml` and found the block which is for **Modbus**. From here I changed the "no" to "yes" for the part which says "enabled". I then exited and saved the config file.
-	![Pasted image 20260630155306.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260630155306.png)
+	![[Pasted image 20260630155306.png]]
 
 
 After doing this, I ran the command in order to validate that I get no errors and that all the rules are working as they should.
@@ -1600,11 +1556,11 @@ sudo suricata -T -c /etc/suricata/suricata.yaml -v
 - `-c /etc/suricata/suricata.yaml`: the config to test.
 - `-v`: verbose so any error names its location.
 
-![Pasted image 20260630155457.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260630155457.png)
+![[Pasted image 20260630155457.png]]
 
 
 It is then time to run `sudo suricata-update` again in order for its self-test to past as well, not just the explicit test I ran.
-	![Pasted image 20260630155731.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260630155731.png)
+	![[Pasted image 20260630155731.png|663x422]]
 Everything checks out, no errors. I now have **Modbus** parsing and detection on and the subnets are scoped to my simulation.
 
 
@@ -1689,12 +1645,12 @@ Now that I created my rule I will see if it was correct. I found out that is has
 I then pasted my rule inside my *local.rules* file, where *Suricata* will be able to use it.
 
 **Note:** The directory for the rule file is  `/var/lib/suricata/rules/`. I created a file named "*local.rules*"  and will edit that for my rules.
-	![Pasted image 20260702163812.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260702163812.png)
+	![[Pasted image 20260702163812.png]]
 
 
 
 Now I have to add the file inside the config file of *Suricata* so that it knows which file to look at 
-	![Pasted image 20260630165822.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260630165822.png)
+	![[Pasted image 20260630165822.png]]
 
 
 I then validated that the rule was working by running this command which tests *Suricata*.
@@ -1703,7 +1659,7 @@ I then validated that the rule was working by running this command which tests *
 sudo suricata -T -c /etc/suricata/suricata.yaml -v
 ```
 
-![Pasted image 20260630170338.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260630170338.png)
+![[Pasted image 20260630170338.png]]
 
 
 Time to actually capture an attack. The first thing I do is fire up *Suricata* with the following command in my Ubuntu terminal
@@ -1715,7 +1671,7 @@ sudo suricata -c /etc/suricata/suricata.yaml -i eno1
 - `-c /etc/suricata/suricata.yaml`: the config file, same as always.
 - `-i eno1`: the new flag. `-i` means "interface," and `eno1` is the physical NIC my macvlan ICS and DMZ traffic rides on. *Suricata* taps the parent interface and sees the container Modbus traffic crossing it. Note there's **no `-T`** this time; without it, *Suricata* runs live instead of just validating.
 
-![Pasted image 20260630171639.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260630171639.png)
+![[Pasted image 20260630171639.png]]
 
 
 
@@ -1731,9 +1687,9 @@ sudo tail -f /var/log/suricata/fast.log
 
 Now all that's left to do is do a *coil manipulation attack* and watch *Suricata* alert me. The attack is the same exact one from [Coil Manipulation Attack](#coil-manipulation-attack)
 
-![Pasted image 20260630171157.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260630171157.png)
+![[Pasted image 20260630171157.png]]
 
-![Pasted image 20260630171139.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260630171139.png)
+![[Pasted image 20260630171139.png]]
 
 As you can see, *Suricata* noticed there was a coil write from `192.168.90.6` (Kali machine) on port `48930` to the **PLC** at `192.168.95.2`. My rule worked successfully!
 
@@ -1760,7 +1716,7 @@ My plan is simple, I am going to create surgical rules for each attack that I ha
 **Phase 2: Cross-layer rules (attacks the write-rules structurally can't see).**
 
 - *Rule* 1000005: **ARP spoofing** detection → catches the MITM/concealment attack. Layer 2, not Modbus payload. No source-based rule can catch this because the whole attack is impersonating a trusted source.
-  > [!WARNING] Abandoned. Suricata 7.0.3 does not implement ARP alerting despite the config exposing a toggle for it. I confirmed this wasn't a config mistake on my end before giving up on it; if a future Suricata release adds real ARP rule support, this SID slot is reserved for it. This is why the ruleset below jumps straight from 1000004 to 1000006.
+  > [!warning] Abandoned. Suricata 7.0.3 does not implement ARP alerting despite the config exposing a toggle for it. I confirmed this wasn't a config mistake on my end before giving up on it; if a future Suricata release adds real ARP rule support, this SID slot is reserved for it. This is why the ruleset below jumps straight from 1000004 to 1000006.
 - *Rule* 1000006: **scan/recon** detection → catches enumeration (coil scanning, register mapping, port scans). Uses `threshold`/`detection_filter` (fire after N events in M seconds), a new mechanic.
 
 **Phase 3: The broad catch-all.**
@@ -1830,11 +1786,11 @@ Now that my rule is done, I can add it to my *local.rules* file and make sure th
 ```
 nano /var/lib/suricata/rules/local.rules
 ```
-![Pasted image 20260702172837.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260702172837.png)
+![[Pasted image 20260702172837.png]]
 
 
 Then I can run *Suricata* as well as monitor the log file using `sudo tail -f /var/log/suricata/fast.log`
-	![Pasted image 20260702173044.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260702173044.png)
+	![[Pasted image 20260702173044.png]]
 
 
 Lastly, I validated the rule using
@@ -1847,7 +1803,7 @@ sudo suricata -T -c /etc/suricata/suricata.yaml -v
 - `-v`: verbose, names the file and line if a rule fails.
 
 All good
-	![Pasted image 20260702173458.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260702173458.png)
+	![[Pasted image 20260702173458.png]]
 
 
 Run *Suricata* using 
@@ -1887,7 +1843,7 @@ c.close()
 ### The result
 
 My *Suricata* rule picked up the attempted unauthorized writes, exactly as intended. Now as we know from my [Holding Register Write Attack](#holding-register-write-attack), this *register* write attempt did not actually close the **purge valve**. However, the traffic was still actually sent to the **PLC** and the **PLC** acted upon it, therefore it was picked up by my *Suricata* rule.
-	![Pasted image 20260706211601.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260706211601.png)
+	![[Pasted image 20260706211601.png]]
 
 
 
@@ -1920,8 +1876,6 @@ That reasoning, protocol HTTP not Modbus, method POST, path `/upload-program-act
 In this stage, I will be implementing an AI in order to automatically read alerts that go off and then give context, a solution, and what exactly happened. In order to do this I will have AI also help with finishing the rules I'd already reasoned through above (1000003) and writing the rest of the roadmap (1000004, 1000006, 1000010) in order to save time.
 
 Here is the complete, finalized set of rules now sitting inside `/local.rules`.
-
-
 ## Suricata Rules
 
 **Rule 1000003: Unauthorized Program Upload**
@@ -1971,8 +1925,8 @@ No function code filter, no table restriction. Any Modbus at all from a non-auth
 ## Adding and Verifying Rules Work
 
 Once I added all these rules to my *local.rules* file. I then ran the validation test
-	![Pasted image 20260710175312.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260710175312.png)
-	![Pasted image 20260710175542.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260710175542.png)
+	![[Pasted image 20260710175312.png]]
+	![[Pasted image 20260710175542.png]]
 
 All good the rules work.
 
@@ -2016,7 +1970,7 @@ Every time my python script sends a request to Anthropics servers requesting to 
 
 The **API** key answer both questions.
 
-> [!WARNING] This is why you **never** hardcode the key in the script file itself. If the file goes to GitHub, the key goes with it, and anyone who finds it can make API calls billed to your account. Storing it as an environment variable (`export ANTHROPIC_API_KEY=...`) keeps it out of the code and out of version control.
+> [!Warning ] This is why you **never** hardcode the key in the script file itself. If the file goes to GitHub, the key goes with it, and anyone who finds it can make API calls billed to your account. Storing it as an environment variable (`export ANTHROPIC_API_KEY=...`) keeps it out of the code and out of version control.
 
 
 ## Process Sequence 
@@ -2061,8 +2015,7 @@ Dashboard polls http://localhost:5000/alerts every 3 seconds
 Dashboard renders the alert in the timeline and shows the *AI analysis*
 
 
-
-I would like to note that this is more than just using AI to capture alerts and give a solution or response to these alerts. I have gone through the trouble of documenting the **baseline** of this simulation, this baseline context makes the AI much stronger in locating and figuring out what is happening very specifically
+I would like to note that this is more than just using AI to capture alerts and give a solution or response to these alerts. I have gone through the trouble of documenting the **baseline** of this simulation, this baseline context makes the AI much stronger in locating and figuring out what is happening very specifically.
 
 The AI is much more intelligent in its responses because I have fed it a detailed system prompt describing how the **ICS** works, the network topology, the authorized hosts, and what each of my rules detects. That baseline context is what makes its analysis specific to my environment instead of generic
 
@@ -2079,7 +2032,7 @@ I have the tail of the log file running using
 ```
 sudo tail -F /var/log/suricata/fast.log
 ```
-![Pasted image 20260711130934.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260711130934.png)
+![[Pasted image 20260711130934.png]]
 
 
 
@@ -2091,23 +2044,23 @@ To run the script
 ```
 python3 ics_alert_pipeline.py
 ```
-![Pasted image 20260711131803.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260711131803.png)
+![[Pasted image 20260711131803.png]]
 
 
 Time to run the attack and see what happens. This is the [Coil Manipulation Attack](#coil-manipulation-attack) from [Stage 3: Attack Execution](#stage-3-attack-execution)
-	![Pasted image 20260711130958.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260711130958.png)
+	![[Pasted image 20260711130958.png]]
 
 I turned the *Chemical A* process on and then off again. Lets see what I get in my logs and dashboard.
-	![Pasted image 20260711130918.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260711130918.png)
-	![Pasted image 20260711130414.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260711130414.png)
-	![Pasted image 20260711130828.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260711130828.png)
+	![[Pasted image 20260711130918.png]]
+	![[Pasted image 20260711130414.png]]
+	![[Pasted image 20260711130828.png]]
 
 
 
 The way that I am getting Claude to accurately diagnose and structure its response comes from the python script, which has a `SYSTEM_PROMPT` variable, telling Claude how it should respond. Here is the prompt Claude reads when parsing these alerts.
 
 My old prompt has flaws. Sometimes Claude does not fully comply with the directions and puts a character or word that should not be in its response. When this happens, the alert tells the user that "AI analysis failed to parse". Which is annoying because I don't get an explanation of the alert or a solution. Just that it happened. To fix this, I created a more strict prompt for Claude and will be using regex to parse Claude's responses as well.
-	![Pasted image 20260713194526.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260713194526.png)
+	![[Pasted image 20260713194526.png]]
 
 **New Prompt**
 
@@ -2177,7 +2130,7 @@ Use this exact schema:
 
 Even after tightening the prompt with the "CRITICAL FORMATTING RULES" above, I was still getting the occasional "AI analysis failed to parse" fallback. I chased this for a while with string surgery in the Python script, replacing smart quotes with straight ones, stripping markdown code fences if Claude wrapped the JSON in them, cutting out everything before the first `{` and after the last `}`, replacing em dashes with hyphens. It helped, but it never fully went away, and I finally understood why: **no amount of prompt wording can *guarantee* format.** Claude is generating plain text token by token. A system prompt full of "CRITICAL RULES" is still just me *asking nicely*. There is nothing structural stopping it from occasionally adding a stray word, an extra quote style, or a bit of preamble.
 
-> [!NOTE] The real fix, in one line
+> [!info] The real fix, in one line
 > Stop asking Claude to *write* JSON. Force it to *call a function* whose inputs are defined by a schema.
 
 This is called **tool use** (also called **function calling**) in the Anthropic API. Instead of describing the JSON shape in prose and hoping Claude copies it exactly, I define the shape as an actual **JSON Schema** object and hand it to the API as a `tool`. Then I set `tool_choice` to force Claude to call that specific tool every time, instead of letting it choose whether to respond in plain text or not.
@@ -2203,7 +2156,7 @@ response = client.messages.create(
 
 I kept a small `_valid_analysis()` check as a second line of defense; the tool schema makes malformed output extremely unlikely, but it costs nothing to double check that all six fields are present, `severity` is one of the four allowed values, and `actions`/`tags` are actually lists of strings before trusting the result.
 
-> [!WARNING] Two related bugs fixed in the same pass
+> [!warning] Two related bugs fixed in the same pass
 > - If the Anthropic API call itself failed (network blip, rate limit, etc.), the old code did `return None` and the alert vanished from the dashboard with zero trace it ever happened. Now that path builds the same well-formed fallback object used for schema failures (tagged `api-error`), so the alert still shows up instead of silently disappearing.
 > - `dashboard.html` read `analysis.severity`, `.actions`, `.tags` straight off the response with no null checks. Since the backend fallback is always well-formed this never actually broke, but it was one contract change away from a JavaScript error blanking the whole alert panel. Added optional chaining and defaults there as cheap insurance.
 
@@ -2214,7 +2167,7 @@ This ties directly back into the [AI Eval Harnesses](#ai-eval-harnesses-and-froz
 
 ## Verifying the Tool-Use Fix and a Second Bug It Uncovered
 
-After making the forced tool-use changew above, I wanted to actually confirm it worked instead of just trusting the theory. Suricata was running live and the dashboard was open in the browser, so with Claude Code I generated real attack traffic and watched it flow through the pipeline end to end.
+After making the forced tool-use change above, I wanted to actually confirm it worked instead of just trusting the theory. Suricata was running live and the dashboard was open in the browser, so with Claude Code I generated real attack traffic and watched it flow through the pipeline end to end.
 
 The test: `docker exec` into the Kali container and use its pre-installed `pymodbus` to send an unauthorized FC5 coil write to coil 40 on the PLC, read the current value first, write the opposite value, then write the original value back so the process ends in the same state it started in. One write like that fires three rules at once off the same packet, since `192.168.90.6` is neither the HMI nor the EWS: **1000001** (coil write), **1000004** (any unauthorized write), and **1000010** (catch-all).
 
@@ -2226,7 +2179,7 @@ Looking at the raw tool call Claude actually sent (printed to the pipeline's ter
 
 That pattern, early fields present and wordy, the last fields in the schema missing outright, is the signature of hitting the token ceiling mid-generation. `max_tokens` was set to `800`, and `severity_reason` plus `what_happened` alone were running 150-200 words each for a "high" severity alert like the Kali coil write. Claude was running out of budget before it finished writing the JSON arguments for the tool call, so the SDK handed back a partial, and therefore schema-invalid, `input` dict.
 
-> [!NOTE] `tool_choice` guarantees Claude *calls* the tool. It does not guarantee the call finishes before the token budget runs out.
+> [!info] `tool_choice` guarantees Claude *calls* the tool. It does not guarantee the call finishes before the token budget runs out.
 
 ### The Fix
 
@@ -2251,11 +2204,11 @@ The tool call must always include all required fields, including actions and tag
 
 Restarted the pipeline and ran the exact same coil-write test again. This time the alert came back fully formed, `actions` (7 items) and `tags` (10 items) both present, no `schema-error` tag anywhere.
 
-![Pasted image 20260727233021.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260727233021.png)
-![Pasted image 20260727233034.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260727233034.png)
-![Pasted image 20260727233001.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260727233001.png)
+![[Pasted image 20260727233021.png]]
+![[Pasted image 20260727233034.png]]
+![[Pasted image 20260727233001.png]]
 
-> [!WARNING] Two-bug lesson
+> [!warning] Two-bug lesson
 > "It calls the tool now" and "it always finishes calling the tool" are different guarantees. Forced tool use fixes the *shape* problem, Claude can no longer ramble outside the schema, but it does not fix a *budget* problem, Claude can still get cut off mid-argument if it's too wordy for the token ceiling. Both needed fixing to actually kill the schema-error fallback for good.
 
 This is another concrete case for the [eval harness](#ai-eval-harnesses-and-frozen-inputs) idea. A frozen high-severity input case in that suite would have caught this the first time, instead of needing a live re-test to notice.
@@ -2270,7 +2223,7 @@ A follow-up session, this time starting from a cold lab: brought up all four lay
 
 Killed the stray process by PID, and it came right back within a few seconds, courtesy of the systemd unit's `Restart=on-failure` policy. A real fix needs `sudo systemctl stop suricata && sudo systemctl disable suricata`, not just `kill`. Left it running for now at my own call, revisit before anything resembling a demo recording.
 
-> [!WARNING] Known imperfect state
+> [!warning] Known imperfect state
 > As of this session, the systemd-managed Suricata instance is still alive alongside the manual `eno1` one. Alerts observed afterward were all correct and complete, so it does not appear to be corrupting `eve.json` in practice, but it has not been cleanly resolved.
 
 ### Re-verifying the Pipeline End to End
@@ -2337,13 +2290,13 @@ On the dashboard side, added a clickable badge in the analysis panel, parsed out
 
 Verified live: the same coil-write burst returned `T0855 - Unauthorized Command Message` consistently across all three co-fired SIDs, matching the hint table exactly.
 
-![Pasted image 20260731133134.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260731133134.png)
-![Pasted image 20260731133915.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260731133915.png)
-![Pasted image 20260731133149.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260731133149.png)
+![[Pasted image 20260731133134.png]]
+![[Pasted image 20260731133915.png]]
+![[Pasted image 20260731133149.png]]
 
 
 
-> [!NOTE] Connects to the eval harness plan
+> [!info] Connects to the eval harness plan
 > The [eval harness](#ai-eval-harnesses-and-frozen-inputs) table below already lists `mitre_technique_present` as an expected structured field, written into this doc before the field existed in the pipeline. It exists now, so the frozen input set should include at least one case that pins down the exact expected technique ID per SID.
 
 ### Closing the Severity Floor Gap
@@ -2390,10 +2343,11 @@ Restarted the pipeline and reran the coil-write test live. None of the alerts ac
 
 # Current Status
 
-This is a living document, not a finished writeup. As of this update, the following is built and working end to end: Stages 1-3 (recon, Modbus mapping, and the full attack catalog, MITM concealment, coil manipulation, ST injection, replay, register hammering, holding register sweep), Stage 4's detection layer (six custom Suricata rules, SIDs 1000001-1000010, alert-only/IDS mode), and Stage 5's AI enrichment pipeline (Flask + forced tool-use Claude integration, dashboard front end, plus a frozen-input eval harness for regression-testing prompt/model/parsing changes — see [Eval Harness: Built and Passing](#eval-harness-built-and-passing)).
+This is a living document, not a finished writeup. As of this update, the following is built and working end to end: Stages 1-3 (recon, Modbus mapping, and the full attack catalog, MITM concealment, coil manipulation, ST injection, replay, register hammering, holding register sweep), Stage 4's detection layer (six custom Suricata rules, SIDs 1000001-1000010, alert-only/IDS mode), and Stage 5's AI enrichment pipeline (Flask + forced tool-use Claude integration, dashboard front end).
 
 What's still open, and what I'm working on next:
 
+- **Eval harness for `ics_alert_pipeline.py`**: a frozen set of captured `eve.json` alerts covering the attack catalog plus a benign baseline, so prompt/model/parsing changes get regression-tested instead of caught by hand (see the note at the top of this doc).
 - **Phase 4: IPS conversion**: moving Suricata from alert-only to inline drop mode on the high-confidence surgical rules, while keeping the broad catch-all as alert-only.
 - **Phase 5: Wazuh integration**: feeding `eve.json` into the Wazuh stack for aggregation and dashboards, closing the red-to-blue loop.
 - **Product valve (register 103) attack**: the holding-register hammer attack didn't produce a physical pressure change because it hit a mirrored register, not the actuator (see Stage 3). Attacking the product valve instead, which actually draws mass out of the reactor, is the more promising path to a real physical effect, and is still an open experiment.
@@ -2405,7 +2359,7 @@ I'll keep updating this doc as each of these closes out rather than treating it 
 
 ### AI Eval Harnesses and Frozen Inputs
 
-> [!NOTE] Overview
+> [!info] Overview
 > An eval harness is an automated test suite for AI-integrated systems. It uses "frozen" (unchanging) input data to detect when prompt edits, model version bumps, or parsing changes break behavior. This is the shipping-engineer version of Deployment Diligence and is required for any Modality 3 (Agency) AI artifact I ship.
 
 ---
@@ -2482,7 +2436,7 @@ Use a second Claude call as evaluator: "Does this explanation correctly identify
 
 ## Suggested Frozen Input Set for ICS Pipeline
 
-> [!NOTE] Superseded by what actually got built
+> [!info] Superseded by what actually got built
 > This was the pre-implementation plan. See [Eval Harness: Built and Passing](#eval-harness-built-and-passing) below for the real set, which diverged in two ways: no ARP case (sid 1000005 was abandoned, no working ARP rule exists to generate a real alert from), and no benign baseline (that tests whether the Suricata rule layer stays silent on authorized traffic, a different layer than this harness, which exercises Claude's enrichment of alerts that already fired).
 
 | # | Case | Attack Type | Expected Severity |
@@ -2496,7 +2450,7 @@ Use a second Claude call as evaluator: "Does this explanation correctly identify
 
 ### Expected Output Fields per Case
 
-> [!NOTE] Also superseded, see the real match strategy below
+> [!info] Also superseded, see the real match strategy below
 > `category` and `requires_human_review` turned out not to be fields worth asking Claude for. They're properties of the SID (which rule fired), not judgment calls the model needs to make, so the real harness derives them in `run_evals.py` from a static lookup instead of adding them to the tool schema. `severity` is mostly checked as "at least" rather than exact, tied to the same `MIN_SEVERITY` floor added to the pipeline itself, since exact-matching a model-generated field is brittle against legitimate wording variance.
 
 | Field | Type | Match Strategy |
@@ -2511,7 +2465,7 @@ Use a second Claude call as evaluator: "Does this explanation correctly identify
 
 ## When to Run the Harness
 
-> [!TIP] Trigger Points
+> [!tip] Trigger Points
 > Run `python evals/run_evals.py` after any of these changes:
 > - System prompt edited
 > - Model version bumped (e.g. `claude-sonnet-4-6` to next release)
@@ -2575,7 +2529,7 @@ HUMAN_REVIEW_SEVERITIES = {"high", "critical"}
 
 
 Example of the **SID rule 100000**
-![Pasted image 20260731141828.png](GRFICSv3%20Documentation-media/Pasted%20image%2020260731141828.png)
+![[Pasted image 20260731141828.png]]
 
 
 The `severity` match strategy also changed from the original plan's "exact match" to mostly "at least this severity," reusing the same `MIN_SEVERITY` floor and `_SEVERITY_RANK` ordering already added to the pipeline for the [severity floor fix](#closing-the-severity-floor-gap). Exact-matching a model-generated field is brittle: Claude can legitimately call something `critical` one run and `high` the next depending on subtle phrasing, and an eval that fails on that kind of harmless variance trains me to ignore it. What actually matters is that severity never drops *below* the floor. The one exception is sid 1000003 (program upload), where the floor is `critical`, the maximum possible value, so floor and ceiling are the same and an exact match is safe rather than brittle.
@@ -2629,7 +2583,7 @@ Before touching anything, reran the same case standalone to see if this was a re
 6/6 cases passed
 ```
 
-> [!NOTE] Why this mattered enough to write down
+> [!info] Why this mattered enough to write down
 > An eval harness that's too strict is its own failure mode, it either gets loosened reflexively until it stops catching anything, or it gets ignored because it cries wolf. Verifying the failure was real *before* changing the bound, rather than just widening it until green, is the difference between calibrating a test and defeating its purpose.
 
 ### What's Running Now
@@ -2655,6 +2609,75 @@ evals/
 
 `run_evals.py` imports `ics_alert_pipeline` directly, clears rate-limit state per case so each one is judged independently of real-world timing, runs `enrich_alert()` on the frozen input, and grades the result: exact match for severity floor/ceiling cases and MITRE IDs, "at least" comparisons where the floor is the real invariant, length-and-keyword bounds for free text, item-count bounds for arrays, and derived (not model-asked) checks for category and human-review status. Exits non-zero on any failure, so it's ready to sit in front of a commit that touches the system prompt, the model version, `temperature`/`max_tokens`, or the JSON extraction logic, per the trigger points already listed above.
 
+
+
+# Stage 6:  Correlation: separate command, register state, and physical effect
+
+
+In this stage, I am going to imrpove the organziation of the alert dashboard. Right now one attack can generate multiple alerts and those are not grouped in a way that lets say,  Splunk would group alerts. It is unorganized in that each alert has its own severity rating and looks as if they are seperate, as well as they have their own "cards".
+
+I will be changing it to be such that if a very specific rule such as a modbus coil attack happens, that SID of that is I believe100004, will be the headline while the other general attacks such as the broad unauthorized modbus traffic, will be suporting evidence with their SID noted.
+
+I will also be implenting a way to know if an attack actually had an affect on the physical process. That is, if a register attack took place and nothing on the physical process changed, then it will state that in the alert, to have more specificity and granular alerting. I will utlize the **EWS** to scan the process as the alert comes in to see if the physical process was changed.
+
+### EWS Didn't Work Out, Used Kali Instead
+
+First problem: the pipeline itself runs on the host, not in a container, and the host's own NIC (`eno1`) sits on a completely different subnet (`192.168.1.0/24`) than the macvlan ICS network. Confirmed with a raw socket connect, `192.168.95.2:502` from the host just times out. So the live read has to happen from inside a container that's actually on the ICS network, `docker exec`, not from the pipeline process itself.
+
+Tried EWS first like I planned. Its image (`workstation/Dockerfile`, upstream, not mine) doesn't have `pymodbus` installed at all. `kali`'s image does, `attacker/Dockerfile` installs `python3-pymodbus` directly, so nothing extra to build. Went with kali for now since it works immediately, but it's a real compromise worth writing down: the system prompt itself calls Kali "never authorized" to talk to the PLC, and now it's the pipeline's own trusted read source for checking physical state. Still strictly read-only and doesn't touch detection either way. Revisit once EWS's image actually carries pymodbus.
+
+### Three Separate Facts Instead of One Story
+
+Every alert with a Modbus write payload now carries three facts:
+- **Command attempted** - pulled straight out of Suricata's own Modbus decode (`modbus.request.write.address` / `.data` in `eve.json`). Ground truth for what was actually sent, not something the model has to guess.
+- **Register/coil observed** - a live, read-only Modbus read of that same address, taken right after the alert.
+- **Physical indicator** - a live read of reactor pressure (input register 108), a real sensor value, not a control mirror like registers 102/103.
+
+New required field on the model's output, `physical_effect_assessment`: `observed` / `not_observed` / `inconclusive` / `not_applicable`. It's told explicitly to base that only on the two live reads above, never on inference. That's what makes something like "unauthorized write detected, but no physical change observed" an honest, groundable claim for register 102 (the mirror, not the real actuator) instead of a guess dressed up as one.
+
+### Bug: Same Packet, Three Different Verdicts
+
+First live test surfaced a problem. One coil-write packet tripped all three rules like it always does (1000001, 1000004, 1000010). Each one independently took its own live read, seconds apart, because enrichment happens one alert at a time. My own restore-write (turning the coil back on) landed in the middle of that sequence, so the three cards for the exact same packet came back with three different verdicts: `observed`, `inconclusive`, `not_observed`. Each individual read was honest about what it saw at that exact moment, but three different answers for one attack defeats the entire point of this feature.
+
+Fixed by grouping alerts server-side on `flow_id` (Suricata gives every rule that matches one packet the same flow_id) and taking the live reads **once per group**, shared across every rule that fired on that packet.
+
+```python
+def group_key(raw: dict) -> str:
+    flow_id = raw.get("flow_id")
+    if flow_id is not None:
+        return f"flow-{flow_id}"
+    return f"{raw.get('src_ip')}-{raw.get('dest_ip')}-{raw.get('dest_port')}-{raw.get('timestamp')}"
+```
+
+Reran the same coil-write test live afterward: all three rules now agree on the same verdict.
+
+> [!info] pymodbus gotcha found along the way
+> pymodbus 3.x response objects all carry a `.bits` attribute regardless of type, empty list for register reads. A naive `hasattr(r, 'bits')` check meant to tell a coil read from a register read always took the wrong branch, silently returning an empty list for every register read instead of the actual value. Fixed by branching on the read kind directly (I already know it going in) instead of introspecting the response object.
+
+### Cutting the Text Down, Splitting Actions
+Once the facts were right, the dashboard itself was still a wall of text: one long "recommended actions" list mixing "block this IP right now" with "audit your firewall rules next quarter," and no visual weight on the one thing this whole feature exists for, whether the attack actually did anything physical.
+
+Split the schema's `actions` into two: `immediate_actions` (max 4, must reference the actual attacker IP/address/value already given, no generic advice) and `after_neutralized_actions` (max 4, hardening/follow-up, explicitly not urgent). Added a one-line `headline` field so there's something to read before the paragraphs start. Tightened every narrative field to 1-2 sentences each with no repeating the same fact across fields.
+
+On the dashboard: a color-coded physical-effect banner (red = confirmed, green = not observed, amber = inconclusive) right under the severity block, showing the command sent, what the PLC reads right now, and reactor pressure. The same status now shows as a small chip in the compact timeline list too, so it's visible before even opening an alert. "Do Now" is a red-tinted block near the top; "After Threat Is Neutralized" got demoted into a quieter, muted list further down. Everything else (what happened, likely attack, tags) is collapsed by default behind a "Show details" toggle instead of always being on screen.
+
+### Eval Harness Had to Move Too
+
+Renaming `actions` broke all six `array_checks` in the harness, since they were checking a field name that no longer existed. Updated all six `expected/*.json` files to check `immediate_actions` / `after_neutralized_actions` instead.
+
+Tightening the prompt caused one real regression: `003_broad_write` failed because `what_happened` no longer said "Modbus" literally, the model wrote "FC5 coil write" instead, just as accurate, just not the exact word the harness was checking for. Rather than loosen the prompt back up and lose the density fix, extended the harness with a `required_keywords_any_of` check (any one of a list is enough, not all of them) and used that instead of a single rigid keyword.
+
+```
+6/6 cases passed
+```
+
+### Screenshot
+![[GRFICSv3 Documentation-1790477004355.webp]]
+![[GRFICSv3 Documentation-1790476995897.webp]]
+
+### What's Left
+
+Steps 2 (expand the eval harness: unsupported physical-impact claims, API-failure cases, a real benign-traffic/false-alarm test) and 3 (process-data monitoring, scoped correctly this time) are still open. Picking this back up next session.
 
 # References
 

@@ -158,6 +158,14 @@
   }
   .sid-chip-row { display:flex; flex-wrap:wrap; gap:4px; }
 
+  .physical-chip {
+    font-size:11px; padding:1px 6px; border-radius:4px; flex-shrink:0;
+    font-family:'JetBrains Mono',monospace; font-weight:700;
+  }
+  .physical-chip.observed     { color:var(--sev-critical); background:rgba(248,81,73,.15); }
+  .physical-chip.not_observed { color:var(--green);        background:rgba(63,185,80,.12); }
+  .physical-chip.inconclusive { color:var(--sev-medium);   background:rgba(227,179,65,.12); }
+
   .group-count {
     font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:700;
     color:var(--muted); background:var(--bg3); border:1px solid var(--border);
@@ -247,6 +255,63 @@
     width:20px; height:20px; border-radius:4px;
     display:flex; align-items:center; justify-content:center; flex-shrink:0; margin-top:1px;
   }
+
+  /* IMMEDIATE ACTIONS: the one thing an operator should act on first */
+  .immediate-block {
+    border:1px solid rgba(248,81,73,.35); background:rgba(248,81,73,.06);
+    border-radius:8px; padding:14px 16px; margin-bottom:16px;
+  }
+  .immediate-block .section-label { color:var(--sev-critical); margin-bottom:10px; }
+  .immediate-block .section-label::after { background:rgba(248,81,73,.25); }
+  .immediate-block .action-num { color:var(--sev-critical); background:rgba(248,81,73,.15); }
+
+  /* AFTER-NEUTRALIZED: deliberately quieter, not urgent */
+  .after-list { list-style:none; display:flex; flex-direction:column; gap:6px; }
+  .after-item {
+    display:flex; align-items:flex-start; gap:8px; font-size:12px;
+    color:var(--muted); line-height:1.5;
+  }
+  .after-item::before { content:'\2013'; flex-shrink:0; }
+
+  /* PHYSICAL EFFECT: the headline verdict on whether the attack actually
+     changed anything, shown prominently since text-heavy cards buried this */
+  .physical-block {
+    border-radius:8px; padding:14px 16px; margin-bottom:16px; border:1px solid;
+  }
+  .physical-block.observed      { border-color:rgba(248,81,73,.4);  background:rgba(248,81,73,.08); }
+  .physical-block.not_observed  { border-color:rgba(63,185,80,.35); background:rgba(63,185,80,.07); }
+  .physical-block.inconclusive  { border-color:rgba(227,179,65,.4); background:rgba(227,179,65,.07); }
+  .physical-block.not_applicable{ border-color:var(--border);       background:var(--bg3); }
+
+  .physical-block-label {
+    font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:700;
+    letter-spacing:.06em; margin-bottom:4px; display:flex; align-items:center; gap:8px;
+  }
+  .physical-block.observed       .physical-block-label { color:var(--sev-critical); }
+  .physical-block.not_observed   .physical-block-label { color:var(--green); }
+  .physical-block.inconclusive   .physical-block-label { color:var(--sev-medium); }
+  .physical-block.not_applicable .physical-block-label { color:var(--muted); }
+
+  .physical-block-desc { font-size:12px; color:var(--text); line-height:1.5; margin-bottom:10px; }
+  .physical-facts { display:flex; flex-direction:column; gap:3px; }
+  .physical-fact {
+    display:flex; gap:8px; font-family:'JetBrains Mono',monospace; font-size:11px;
+  }
+  .physical-fact-label { color:var(--muted); flex-shrink:0; width:110px; }
+  .physical-fact-value { color:var(--text); }
+
+  .headline-text {
+    font-size:15px; font-weight:600; color:var(--text); margin-top:2px; line-height:1.4;
+  }
+
+  /* DETAILS: what_happened / likely_attack / tags, collapsed by default */
+  .details-toggle {
+    display:flex; align-items:center; gap:6px; cursor:pointer;
+    font-family:'JetBrains Mono',monospace; font-size:11px; font-weight:600;
+    color:var(--blue); background:none; border:none; padding:6px 0; margin-bottom:8px;
+  }
+  .details-toggle .chevron { transition:transform .15s; display:inline-block; }
+  .details-toggle.open .chevron { transform:rotate(90deg); }
 
   .severity-block {
     display:flex; align-items:center; gap:12px;
@@ -361,6 +426,7 @@ let allAlerts  = [];
 let selectedId = null;
 let connected  = false;
 let expandedGroups = new Set();
+let detailsOpen = false;   // collapsed by default; reset when a new alert is selected
 
 const SEV_RANK = { critical:3, high:2, medium:1, low:0 };
 const GROUP_WINDOW_MS = 500; // same src/dst/port within this window = one packet, multiple rules
@@ -449,6 +515,7 @@ function renderSingleCard(a) {
             <div class="alert-msg">${a.msg}</div>
             <div class="alert-ips">${a.src_ip}<span class="arrow">&rarr;</span>${a.dest_ip}:${a.dest_port}</div>
           </div>
+          ${physicalChipHtml(a.analysis)}
           <div class="sev-label ${severity}">${severity.toUpperCase()}</div>
         </div>
         <div class="alert-time-sid">
@@ -483,6 +550,7 @@ function renderGroupCard(g) {
             <div class="alert-msg">${headline.msg}</div>
             <div class="alert-ips">${g.src_ip}<span class="arrow">&rarr;</span>${g.dest_ip}:${g.dest_port}</div>
           </div>
+          ${physicalChipHtml(headline.analysis)}
           <div class="group-count">&times;${g.members.length}</div>
           <div class="sev-label ${topSev}">${topSev.toUpperCase()}</div>
         </div>
@@ -527,16 +595,55 @@ function mitreBadgeHtml(mitreStr) {
     : `<div class="mitre-badge">${body}</div>`;
 }
 
+const PHYSICAL_LABELS = {
+  observed:       '&#9888; PHYSICAL EFFECT CONFIRMED',
+  not_observed:   '&#10003; NO PHYSICAL EFFECT CONFIRMED',
+  inconclusive:   '? PHYSICAL EFFECT INCONCLUSIVE',
+  not_applicable: 'NOT APPLICABLE (no write in this alert)',
+};
+const PHYSICAL_ICON = { observed: '&#9888;', not_observed: '&#10003;', inconclusive: '?' };
+
+// small chip shown in the timeline list itself, so physical-effect status is
+// visible before an operator even opens an alert, not just in the detail panel
+function physicalChipHtml(an) {
+  const k = an?.physical_effect_assessment;
+  if (!k || !PHYSICAL_ICON[k]) return '';
+  return `<div class="physical-chip ${k}" title="${(PHYSICAL_LABELS[k]||'').replace(/&#\d+;\s*/,'')}">${PHYSICAL_ICON[k]}</div>`;
+}
+
+function physicalBlockHtml(an) {
+  const kind = an.physical_effect_assessment && PHYSICAL_LABELS[an.physical_effect_assessment]
+    ? an.physical_effect_assessment : 'inconclusive';
+  return `
+    <div class="physical-block ${kind}">
+      <div class="physical-block-label">${PHYSICAL_LABELS[kind]}</div>
+      <div class="physical-block-desc">${an.physical_effect_reason ?? ''}</div>
+      <div class="physical-facts">
+        <div class="physical-fact"><span class="physical-fact-label">Command sent</span><span class="physical-fact-value">${an.command_attempted ?? ''}</span></div>
+        <div class="physical-fact"><span class="physical-fact-label">PLC now reads</span><span class="physical-fact-value">${an.register_observed ?? ''}</span></div>
+        <div class="physical-fact"><span class="physical-fact-label">Reactor pressure</span><span class="physical-fact-value">${an.physical_indicator ?? ''}</span></div>
+      </div>
+    </div>
+  `;
+}
+
 function renderAnalysis(alert) {
   const an = alert.analysis ?? {};
   const severity = an.severity ?? 'unknown';
-  const actions  = Array.isArray(an.actions) ? an.actions : [];
-  const tags     = Array.isArray(an.tags) ? an.tags : [];
+  const immediate = Array.isArray(an.immediate_actions) ? an.immediate_actions : [];
+  const after     = Array.isArray(an.after_neutralized_actions) ? an.after_neutralized_actions : [];
+  const tags      = Array.isArray(an.tags) ? an.tags : [];
+  // command_attempted / register_observed / physical_indicator are stored on
+  // the alert itself (deterministic facts), not inside analysis (the model's
+  // output), so the physical-effect block reads from both.
+  const physical = { ...an, command_attempted: alert.command_attempted, register_observed: alert.register_observed, physical_indicator: alert.physical_indicator };
+
   document.getElementById('analysis-panel').innerHTML = `
     <div class="analysis-alert-header">
       <div class="analysis-sev-bar sev-${sev(severity)}"></div>
       <div>
         <div class="analysis-alert-title">${alert.msg}</div>
+        <div class="headline-text">${an.headline ?? ''}</div>
         <div class="analysis-meta-row">
           <div class="meta-item"><div class="meta-label">Timestamp</div><div class="meta-value">${fmtFull(alert.timestamp)}</div></div>
           <div class="meta-item"><div class="meta-label">Source</div><div class="meta-value">${alert.src_ip}:${alert.src_port}</div></div>
@@ -554,33 +661,54 @@ function renderAnalysis(alert) {
       <div class="severity-block-desc">${an.severity_reason ?? ''}</div>
     </div>
 
+    ${physicalBlockHtml(physical)}
+
     ${mitreBadgeHtml(an.mitre_technique)}
 
-    <div class="analysis-section">
-      <div class="section-label">What Happened</div>
-      <div class="analysis-text">${an.what_happened ?? ''}</div>
-    </div>
-
-    <div class="analysis-section">
-      <div class="section-label">Likely Attack</div>
-      <div class="analysis-text">${an.likely_attack ?? ''}</div>
-    </div>
-
-    <div class="analysis-section">
-      <div class="section-label">Recommended Actions</div>
+    <div class="immediate-block">
+      <div class="section-label">Do Now</div>
       <ul class="action-list">
-        ${actions.map((act,i)=>`<li class="action-item"><div class="action-num">${i+1}</div><div>${act}</div></li>`).join('')}
+        ${immediate.map((act,i)=>`<li class="action-item"><div class="action-num">${i+1}</div><div>${act}</div></li>`).join('')}
       </ul>
     </div>
 
-    <div class="analysis-section">
-      <div class="section-label">Tags</div>
-      <div class="tag-row">${tags.map(t=>`<span class="tag">${t}</span>`).join('')}</div>
+    <button class="details-toggle ${detailsOpen ? 'open' : ''}" onclick="toggleDetails()">
+      <span class="chevron">&#9656;</span>${detailsOpen ? 'Hide' : 'Show'} details (what happened, why, tags, after-action items)
+    </button>
+    <div id="details-content" style="${detailsOpen ? '' : 'display:none'}">
+      <div class="analysis-section">
+        <div class="section-label">What Happened</div>
+        <div class="analysis-text">${an.what_happened ?? ''}</div>
+      </div>
+
+      <div class="analysis-section">
+        <div class="section-label">Likely Attack</div>
+        <div class="analysis-text">${an.likely_attack ?? ''}</div>
+      </div>
+
+      <div class="analysis-section">
+        <div class="section-label">After Threat Is Neutralized</div>
+        <ul class="after-list">
+          ${after.map(act=>`<li class="after-item">${act}</li>`).join('')}
+        </ul>
+      </div>
+
+      <div class="analysis-section">
+        <div class="section-label">Tags</div>
+        <div class="tag-row">${tags.map(t=>`<span class="tag">${t}</span>`).join('')}</div>
+      </div>
     </div>
   `;
 }
 
+function toggleDetails() {
+  detailsOpen = !detailsOpen;
+  const alert = allAlerts.find(a => a.id === selectedId);
+  if (alert) renderAnalysis(alert);
+}
+
 function selectAlert(id) {
+  if (id !== selectedId) detailsOpen = false;   // collapse details when switching alerts
   selectedId = id;
   renderTimeline();
   const alert = allAlerts.find(a => a.id === id);

@@ -90,6 +90,9 @@ def check_text_bounds(actual: str, spec: dict, label: str, failures: list[str]) 
     for kw in spec.get("required_keywords", []):
         if kw.lower() not in text.lower():
             failures.append(f"{label}: missing required keyword {kw!r}")
+    any_of = spec.get("required_keywords_any_of")
+    if any_of and not any(kw.lower() in text.lower() for kw in any_of):
+        failures.append(f"{label}: none of the alternative keywords {any_of!r} present (need at least one)")
 
 
 def check_array_bounds(actual, spec: dict, label: str, failures: list[str]) -> None:

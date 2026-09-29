@@ -1,39 +1,43 @@
 {
-  "case_id": "004_catchall",
-  "sid": 1000010,
-  "note": "Catch-all rule for unauthorized Modbus traffic that doesn't match a specific write signature. Severity and MITRE technique are legitimately context-dependent here by design, so this case only pins the floor and category, not an exact severity or a single technique ID. Also intentionally does not assert requires_human_review, since that's derived from severity and severity is not fixed for this SID.",
-  "expect": {
-    "severity_min": "medium",
-    "mitre_technique_id_any_of": [
-      "T0855",
-      "T0846"
-    ],
-    "category": "unclassified"
-  },
-  "text_checks": {
-    "severity_reason": {
-      "min_len": 20,
-      "max_len": 650
+    "case_id": "004_catchall",
+    "sid": 1000010,
+    "note": "Catch-all rule for unauthorized Modbus traffic that doesn't match a specific write signature. Severity and MITRE technique are legitimately context-dependent here by design, so this case only pins the floor and category, not an exact severity or a single technique ID. Also intentionally does not assert requires_human_review, since that's derived from severity and severity is not fixed for this SID.",
+    "expect": {
+        "severity_min": "medium",
+        "mitre_technique_id_any_of": [
+            "T0855",
+            "T0846"
+        ],
+        "category": "unclassified"
     },
-    "what_happened": {
-      "min_len": 40,
-      "max_len": 800,
-      "required_keywords": [
-        "Modbus"
-      ]
+    "text_checks": {
+        "severity_reason": {
+            "min_len": 20,
+            "max_len": 650
+        },
+        "what_happened": {
+            "min_len": 40,
+            "max_len": 800,
+            "required_keywords_any_of": [
+                "Modbus", "FC5", "FC6", "FC15", "FC16", "coil", "register", "PLC"
+            ]
+        },
+        "likely_attack": {
+            "min_len": 20,
+            "max_len": 650
+        }
     },
-    "likely_attack": {
-      "min_len": 20,
-      "max_len": 650
+    "array_checks": {
+        "tags": {
+            "min_items": 1
+        },
+        "immediate_actions": {
+            "min_items": 1,
+            "max_items": 4
+        },
+        "after_neutralized_actions": {
+            "min_items": 1,
+            "max_items": 4
+        }
     }
-  },
-  "array_checks": {
-    "actions": {
-      "min_items": 1,
-      "max_items": 10
-    },
-    "tags": {
-      "min_items": 1
-    }
-  }
 }
