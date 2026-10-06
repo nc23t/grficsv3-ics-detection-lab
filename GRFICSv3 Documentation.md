@@ -2,6 +2,54 @@
 
 # GRFICSv3 Documentation
 
+> **Disclaimer:** Every attack documented here targets an isolated, self-hosted GRFICSv3 simulation with no connection to real industrial equipment. This document is published for security education and authorized-research purposes only, it is not instruction for attacking real production ICS/OT environments. Unauthorized access to real industrial control systems is illegal and can cause physical harm.
+
+## Table of Contents
+
+- [Stage 1: Reconnaissance & Environment Mapping](#stage-1-reconnaissance-environment-mapping)
+  - [Topology](#topology)
+  - [Understanding the ICS Chemical Process](#understanding-the-ics-chemical-process)
+- [Stage 2: Modbus Protocol Analysis](#stage-2-modbus-protocol-analysis)
+  - [Capturing Traffic from HMI](#capturing-traffic-from-hmi)
+- [Stage 3: Attack Execution](#stage-3-attack-execution)
+  - [Wireshark arpspoof Attack](#wireshark-arpspoof-attack)
+  - [Register Manipulation Attack w/ MITM](#register-manipulation-attack-w-mitm)
+  - [Coil Manipulation Attack](#coil-manipulation-attack)
+  - [Injected Structured Text (ST) Attack](#injected-structured-text-st-attack)
+  - [Replay Attack](#replay-attack)
+  - [Holding Register Write Attack](#holding-register-write-attack)
+- [Stage 4: Detection and Defense](#stage-4-detection-and-defense)
+  - [Setup](#setup)
+  - [What are Rules?](#what-are-rules)
+  - [Installing Rules](#installing-rules)
+  - [Creating Custom Rules](#creating-custom-rules)
+  - [Placing the 1st Custom Rule](#placing-the-1st-custom-rule)
+  - [Rule Roadmap](#rule-roadmap)
+  - [Phase 1: Surgical detection rules](#phase-1-surgical-detection-rules)
+- [Stage 5: AI-Assisted Alert Enrichment](#stage-5-ai-assisted-alert-enrichment)
+  - [Suricata Rules](#suricata-rules)
+  - [Adding and Verifying Rules Work](#adding-and-verifying-rules-work)
+  - [Process Sequence](#process-sequence)
+  - [Starting the AI response](#starting-the-ai-response)
+  - [Fixing the Parse Errors for Good: Forced Tool Use](#fixing-the-parse-errors-for-good-forced-tool-use)
+  - [Verifying the Tool-Use Fix and a Second Bug It Uncovered](#verifying-the-tool-use-fix-and-a-second-bug-it-uncovered)
+  - [Dashboard UX Fixes and a MITRE ATT&CK Layer](#dashboard-ux-fixes-and-a-mitre-attck-layer)
+- [Current Status](#current-status)
+  - [To add](#to-add)
+  - [Key Concepts](#key-concepts)
+  - [How It Works](#how-it-works)
+  - [Directory Structure](#directory-structure)
+  - [Comparison Strategies](#comparison-strategies)
+  - [Suggested Frozen Input Set for ICS Pipeline](#suggested-frozen-input-set-for-ics-pipeline)
+  - [When to Run the Harness](#when-to-run-the-harness)
+  - [Key Terms](#key-terms)
+  - [Next Steps](#next-steps)
+  - [Eval Harness: Built and Passing](#eval-harness-built-and-passing)
+  - [Phase 1: Expand the existing eval harness](#phase-1-expand-the-existing-eval-harness)
+  - [Phase 2: Adding Evidence Trailing](#phase-2-adding-evidence-trailing)
+  - [Phase 3: Triage Workflow, Audit Trail, and a Decluttered Dashboard](#phase-3-triage-workflow-audit-trail-and-a-decluttered-dashboard)
+  - [Phase 4: Evidence-Completeness Badge + AI-Degradation Failsafe](#phase-4-evidence-completeness-badge-ai-degradation-failsafe)
+- [References](#references)
 
 # Stage 1: Reconnaissance & Environment Mapping
 
@@ -2678,6 +2726,210 @@ Tightening the prompt caused one real regression: `003_broad_write` failed becau
 ### What's Left
 
 Steps 2 (expand the eval harness: unsupported physical-impact claims, API-failure cases, a real benign-traffic/false-alarm test) and 3 (process-data monitoring, scoped correctly this time) are still open. Picking this back up next session.
+
+## Phase 1: Expand the existing eval harness
+Now that I have added some more features to this detection pipeline, I need to update the eval harness to accomadate those features. I would like to run each of the previous 6 tests in the `evals/run_evals.py` several times to make sure that those tests pass reliably and not by accident. Then I am going to add a new eval for the API-failure test case we caught earlier, as well as the case of unsupported physical-impact claims. Lastly, I am going to add a test for legit traffic, I do not want legit traffic getting funneled into this detection pipeline and giving false positives.
+
+To carry out the changes fo the first 3 ideas, it's just a code change for the most part, and the 4th addition I will just use 
+
+### Repeat Runs, API-Failure Case, and the Physical-Claim Check
+Added `--repeat N` to `run_evals.py` (default stays 1, fast single pass). Each case now runs N times independently and reports how many passed, not just one boolean. Also added a 7th check that isn't a frozen input at all: `API_FAILURE_FALLBACK` monkeypatches `client.messages.create` to raise, calls `enrich_alert()` directly, and asserts the fallback analysis still has the severity floor applied, `physical_effect_assessment` set to `inconclusive`, and the `api-error` tag. That path had only ever been seen working by accident before (a real invalid key produced a 401 mid-session, never verified on purpose.
+
+The physical-claim consistency check runs on every case, not just new ones: if `physical_effect_assessment` is `not_observed` or `inconclusive`, it scans `what_happened`/`likely_attack` for confident-effect language ("confirmed", "resulted in", etc.) paired with a process noun, and fails if the model contradicts its own grounded verdict in free text. Verified it actually works, not just passes trivially, with a synthetic before/after pair: fed it a fake result claiming "confirmed a pressure change" while `physical_effect_assessment` said `not_observed`, caught it; fed it honest restrained text with the same assessment, passed clean.
+
+### The Live Traffic Test Needed More Than Expected
+The false-alarm test (`evals/test_no_false_alarms.py`) is its own script, not part of `run_evals.py`'s frozen-input loop, since it needs the live lab up and there's no such thing as a "frozen input" for legitimate traffic that never happened yet.
+
+Planned to send it from EWS and HMI directly, since they're the real authorized sources. Neither container has `pymodbus` installed (same gap noted earlier for the read-vantage work), so the test installs `python3-pymodbus` via `apt` on the fly, matching how kali's own image does it (`attacker/Dockerfile`), not pip, since neither container even has pip. Second snag: apt gave HMI/EWS pymodbus 2.1.0, a much older release than kali's 3.13, with a different import path (`pymodbus.client.sync` instead of `pymodbus.client`). Made the test try the modern import first and fall back to the old one, so it isn't tied to whatever version apt happens to resolve.
+
+Used plain reads (`read_coils`, `read_holding_registers`), not writes, so the test doesn't change process state to prove its point. First real run: 10 events observed from HMI/EWS in the test window, zero matched any of the 6 custom SIDs. Also checked the negative case isn't vacuous, fed the same filtering logic a fake alert event from an authorized IP and confirmed it gets flagged as a false alarm.
+
+### Ran Into a Real Billing Wall, Which Is Kind of the Point
+First `--repeat 3` run came back 5/7, not from a real regression:
+
+```
+Error code: 400 - {'type': 'invalid_request_error', 'message': 'Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.'}
+```
+
+Ran the account down mid-sweep (18 calls across 6 cases, no caching yet at that point). The pipeline's own fallback handled it exactly right, severity floor still applied, but the eval *report* didn't: it showed generic "missing keyword"/"wrong MITRE ID" failures for cases that hit the fallback, reading exactly like a content defect when it's actually an availability problem. Fixed `grade()` to check for the `api-error`/`schema-error` tags first and short-circuit with one clear line instead of running content checks against a hardcoded fallback object that was never going to pass them:
+
+```python
+if "api-error" in tags:
+    return ["enrichment degraded to the API-error fallback (Claude call failed, check API key/billing/connectivity), not a content defect"]
+```
+
+### Prompt Caching, an Unplanned Side Quest
+Burning over a dollar on one `--repeat 3` sweep raised a fair question: is this sustainable as more SIDs and cases get added? The real cost driver isn't the eval design, it's that every call, eval or live alert, sends the entire `SYSTEM_PROMPT` and the tool schema as fresh input tokens, and neither one ever changes between calls.
+
+Added `cache_control: {"type": "ephemeral"}` to both the system prompt block and the tool definition in `enrich_alert()`'s API call. Verified directly with two back-to-back calls:
+
+```
+call 0: input=426 cache_creation=2471 cache_read=0
+call 1: input=426 cache_creation=0 cache_read=2471
+```
+
+First call pays to create the cache, every call after reads those same 2471 tokens at a steep discount instead of paying full price again. Restarted the live pipeline so real alerts get this too, not just evals.
+
+Reran `--repeat 3` clean afterward, real credits this time:
+
+```
+7/7 cases passed (repeat=3)
+```
+
+All 18 individual runs (6 cases x 3) passed, no variance surfaced. Consistency confirmed, not just assumed.
+
+## Phase 2: Adding Evidence Trailing
+In this section I am adding a way for an operator to confirm what is being shown on the AI enriched alert dashboard. At the moment, the dashboard only shows the end result of the enriched alert, based on the suricata rule generated. This is going to change in that I will add a "ground truth log" type of section of each alert where a person can click and open all the logs that correlated to said alert on the dashboard.
+
+This will give operators a way to confirm what the AI alert is telling them by providing them the logs to show the attack or malicious action that just took place.
+
+The structural reason this didn't already exist: `watch_eve_log()` reads the raw Suricata JSON off disk, hands it to `enrich_alert()`, and once that function returns, the raw dict is gone. Only the enriched result ever made it into the in-memory `alerts` deque. There was nothing to pivot back *to*.
+
+
+
+
+### What Got Added to `ics_alert_pipeline.py`
+The obvious "full" version of this would also let you open the actual packet capture for an alert, not just the two log lines. I decided against it for now. Suricata isn't even confirmed to have packet logging turned on, that's a config change and real added disk. Scoped it down to just the `eve.json` entry and the matching `fast.log` line, left pcap as a possible future stretch.
+
+The raw alert dict (`raw`) was already being passed into `enrich_alert()` as an argument the whole time, it just never made it into the returned object.
+
+```python
+"raw_eve_json": raw,
+"fast_log_line": _find_fast_log_line(raw),
+```
+
+The second half is matching that same alert to its line in `fast.log`. `fast.log` is a plain-text, human-readable log, it carries no `flow_id`, no structured join key back to `eve.json` at all. So this is a heuristic, not a guaranteed join:
+
+```python
+def _find_fast_log_line(raw: dict, tolerance_sec: float = 2.0) -> str | None:
+    sid = raw.get("alert", {}).get("signature_id")
+    src_ip = raw.get("src_ip")
+    dest_ip = raw.get("dest_ip")
+    ...
+    sid_marker = f"[1:{sid}:"
+    # seek to the last ~1MB of the file, match sid + both IPs,
+    # then pick whichever matching line is closest in time
+```
+
+It matches on signature ID, both IPs, and timestamp proximity (2 seconds by default), and only reads the last ~1MB of `fast.log` instead of the whole file, since that log is append-only and just keeps growing the longer the lab runs. If nothing matches within the tolerance window, it returns `None` instead of guessing. This project has a standing rule against claiming more certainty than the facts support (same reasoning as `physical_effect_assessment` from Stage 6), and a wrong fast.log line would be worse than no line at all.
+
+### Dashboard: A Separate "Raw Evidence" Toggle
+On the dashboard side, I didn't want to just dump this into the existing "Show details" toggle from Stage 6. That toggle holds the model's own narrative, what happened, likely attack, tags while this is a  different kind of content, it's ground-truth material meant for verifying the model, not more AI output. 
+
+One thing worth calling out: `raw_eve_json` and `fast_log_line` are quite literally bytes that came off the wire from whatever the attacker sent. Every other string the dashboard renders is either my own system prompt's doing or Claude's structured output. This is the first field that's genuinely untrusted, attacker-influenced text, so before dropping it into the page I escape it instead of injecting it straight into `innerHTML`.
+
+![[GRFICSv3 Documentation-1790820641897.webp]]
+
+### Seeing It Expanded
+Clicking "Show raw evidence" expands into the pretty-printed `eve.json` entry in a monospace block, with the matching `fast.log` line underneath it, or "No matching fast.log line found" if the heuristic above didn't find one. Here's a real sid 1000001 coil-write alert from testing this, you can see the full Modbus decode, flow_id, and the exact source (Kali, 192.168.90.6) and destination (the PLC, 192.168.95.2) right there, no AI involved in this view at all.
+
+![[GRFICSv3 Documentation-1790820650680.webp]]
+
+### Verifying It Actually Works
+Before trusting the live test, checked the matching logic in isolation: fed `_find_fast_log_line` a real frozen eve.json alert alongside two synthetic fast.log lines, one close in time and one 40 seconds off, confirmed it picked the close one and ignored the far one. Also confirmed it returns a clean `None`, not an exception, when `fast.log` doesn't exist at all. Then mocked out the Claude call entirely and ran a frozen alert through the real `enrich_alert()` to confirm both new fields land correctly in the returned dict without touching anything else in it.
+
+After restarting the pipeline, I ran the coil-write test on coil 40 from Kali, off then back on, same as always. Both alerts landed in the dashboard with the evidence toggle populated, and the raw JSON shown matched the real `eve.json` entry for that flow exactly.
+
+
+
+## Phase 3: Triage Workflow, Audit Trail, and a Decluttered Dashboard
+Three more additions on top of the evidence trail above, pulled from CISA's AI-in-OT guidance 
+
+**Disposition workflow.** Every alert now carries a `disposition` (`new` -> `acknowledged` / `investigating` -> `resolved_true_positive` / `resolved_false_positive`) and a `disposition_history` of who changed it and when, updated via `POST /alerts/<id>/disposition`. This is CISA's human-in-the-loop principle directly: an operator has to actually act on an alert, not just have it shown to them.
+	![[GRFICSv3 Documentation-1790835161245.webp]]
+	
+
+One attack packet commonly trips several rules at once (a coil write hits 1000001, 1000004, and 1000010 off the same packet). Disposition cascades across the whole correlated group instead of each rule carrying its own independent status, keyed on `group_id`, the same flow_id-based key already used to share the physical facts. Triaging one event three separate times with three possibly-contradictory outcomes isn't how real alert triage works.
+	![[GRFICSv3 Documentation-1790835177540.webp]]
+	![[GRFICSv3 Documentation-1790835229167.webp]]
+Resolving (either outcome) deletes the whole group outright instead of marking it closed and leaving it sitting. I decided to have them deleting because this lab is still a work in progress and saving every alert will take storage that is not worth anything.
+
+**AI audit trail.** Every enrichment call, success or failure, writes one line to `ai_audit.jsonl`: the exact prompt sent, the raw tool output before the severity floor, the final analysis after it, and an actor tag (`ai:ics_alert_pipeline:<model>`) kept separate from the `human` tag used on disposition updates. This part is the other half of the human-in-the-loop from CISA, where the AI's output and inputs are stored and validated whenever need be.
+
+**Decluttered dashboard.** Grouping moved from a client-side time-window guess to the backend's own `group_id`, exact instead of approximate. For a multi-rule group, source, destination, protocol, the physical-effect block, and "Do Now" now render once instead of once per rule, since they're identical across the whole group anyway. A compact "Detections in This Group" list shows one row per rule, collapsed by default, expand one to see its own narrative, MITRE pick, and raw evidence. Single-rule alerts, still the common case, are unchanged.
+
+### Flagged for Later: Physical Effect Has No Before-State
+`physical_effect_assessment` only ever takes a live read *after* a write, never a baseline *before* it. So it can't tell "this command changed something" from "this command was a no-op because that was already the state", a coil that's already off getting written off again can still come back `observed` if the pressure reading happens to look abnormal for unrelated reasons. Caught this live when a repeat coil-off write got marked `observed` with no actual state change. Not fixed tonight, flagged to come back to.
+
+
+## Phase 4: Evidence-Completeness Badge + AI-Degradation Failsafe
+In this phase I will implement more ways to validate and track the trustworthyness of the AI output. I plan to implement a rule where if 30% or more of enriched alerts are faulty or failed, than a big noticeable banner at the top of the dashboard will pop up shoing that AI enrichment has been degraded.
+
+Also, I will add an additional field which will be shown as a small badge next to the physical affect block, so if `physical_effect_assessment` says "observed" but `evidence_completeness` says "partial", an operator will know to weigh that verdict with more skepticism instead of taking it at face value.
+
+This new phase will also introduce a better way to handle API errors/schema errors.
+
+### How Evidence Completeness Is Computed
+`_evidence_completeness()` in `ics_alert_pipeline.py` never asks the model, same reasoning as the severity floor from Stage 6: compute what can actually be computed in code, don't let the model self-report something it can get wrong.
+
+```python
+def _evidence_completeness(command_attempted, register_observed, physical_indicator):
+    if command_attempted.startswith("No write payload parsed"):
+        return "not_applicable"
+    reads = (register_observed, physical_indicator)
+    failed = sum(1 for r in reads if "unavailable" in r)
+    if failed == 0:
+        return "full"
+    if failed == len(reads):
+        return "none"
+    return "partial"
+```
+
+It only checks whether the two *live* Modbus reads that back a physical-effect verdict actually succeeded:`register_observed` (reading back the exact address that was just written) and `physical_indicator` (reactor pressure, input register 108). Both succeed -> `full`. One fails -> `partial`. Both fail -> `none`. A recon or catch-all alert never had a write payload to check in the first place, so it gets `not_applicable` rather than being counted as degraded.
+
+The important limit: `full` only means the reads *answered*, not that the values prove anything about causation. That distinction is  why the before-state gap below is still a separate problem, an alert can be `evidence_completeness: full` and still be wrong about what caused what.
+
+Shown as a small badge sitting right on the physical-effect block's own label row, color-matched to the same red/amber/green/gray scheme the block already uses.
+
+### How the Degradation Failsafe Works
+New rolling state, same pattern as the existing `last_call` rate-limit dict:
+
+```python
+recent_outcomes = deque(maxlen=20)
+AI_DEGRADED_THRESHOLD = 0.3
+```
+
+Every `enrich_alert()` call appends its own outcome, `"success"`, `"schema-error"`, or `"api-error"`, to this deque, regardless of which of the three code paths it took. `/status` now reports:
+
+```json
+{"ai_degraded": true, "recent_error_rate": 0.35, ...}
+```
+
+whenever more than 30% of the last 20 calls failed. The dashboard already polled `/alerts` every 3 seconds for the alert list; added a second, fully independent `fetchStatus()` on the same cadence. When `ai_degraded` flips true, a red banner spans the full width right under the header: "AI enrichment degraded, N% of recent alerts failed enrichment, review raw Suricata evidence directly."
+
+This is deliberately a dashboard-wide, impossible-to-miss element rather than another tag buried on individual cards. The whole point is catching a *pattern* (an expired API key, a billing wall like the one I actually hit during the eval-harness work, a prompt change that broke the schema) that's invisible if the only view into it is one alert card at a time.
+
+**Checking it directly, outside the dashboard:**
+```bash
+curl http://localhost:5000/status              # live aggregate: ai_degraded, recent_error_rate
+grep -v '"outcome": "success"' ai_audit.jsonl   # the actual failed calls, full raw tool output each
+```
+The first command is literally what the dashboard's banner is polling. The second is how to actually investigate *why* it's degraded, every audit-log line carries the raw tool output and which error path it took, so a red banner is always explainable, never just a number with nothing behind it.
+
+### The Before-State Gap, and the Fix Still to Build
+
+Flagged above: `physical_effect_assessment` only ever sees a live read taken *after* a write, so it can't tell "this write changed something" from "this write was a no-op because that was already the state." By the time Suricata logs an alert, the write has already landed on the PLC, there's no way to go back and grab a true read from *before* that specific packet.
+
+The fix doesn't need time travel, it needs memory. Keep the pipeline's own running record of the last known value per address (same shape as `last_call`), and compare the new write against *that* instead of inferring causation from a single after-the-fact snapshot:
+
+```python
+last_known_state = {}   # (kind, address) -> last observed/written value
+
+# inside gather_physical_facts(), before taking the live post-write read:
+previous = last_known_state.get((kind, address))
+
+# after taking the live read:
+state_transition = (
+    "unknown"   if previous is None else
+    "unchanged" if previous == value else
+    "changed"
+)
+last_known_state[(kind, address)] = value
+```
+
+`state_transition` becomes a fourth deterministic fact alongside the existing three, and `SYSTEM_PROMPT` gets one new hard rule: `physical_effect_assessment` can never be `"observed"` unless `state_transition` is `"changed"`, no matter how the pressure reading looks on its own. The first time any address is written in a session, there's no baseline yet, so it's honestly `"unknown"` rather than a guess dressed up as a fact. This would have caught exactly the case I hit live tonight: a repeat coil-off write that got marked `observed` purely because the pressure reading looked abnormal, with no actual state change behind it.
+
+Not built yet. This is the design, not the result.
 
 # References
 

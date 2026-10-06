@@ -292,6 +292,19 @@
   .physical-block.inconclusive   .physical-block-label { color:var(--sev-medium); }
   .physical-block.not_applicable .physical-block-label { color:var(--muted); }
 
+  /* EVIDENCE COMPLETENESS: how much of the physical-effect verdict above is
+     actually grounded in live reads that succeeded, computed in code so an
+     operator knows when to weight the verdict more cautiously */
+  .evidence-completeness-badge {
+    font-family:'JetBrains Mono',monospace; font-size:9px; font-weight:700;
+    letter-spacing:.05em; padding:2px 7px; border-radius:10px; text-transform:uppercase;
+    margin-left:auto; flex-shrink:0;
+  }
+  .evidence-completeness-badge.full           { color:var(--green);        background:rgba(63,185,80,.12); }
+  .evidence-completeness-badge.partial        { color:var(--sev-medium);   background:rgba(227,179,65,.12); }
+  .evidence-completeness-badge.none           { color:var(--sev-critical); background:rgba(248,81,73,.12); }
+  .evidence-completeness-badge.not_applicable { color:var(--muted);        background:var(--bg3); }
+
   .physical-block-desc { font-size:12px; color:var(--text); line-height:1.5; margin-bottom:10px; }
   .physical-facts { display:flex; flex-direction:column; gap:3px; }
   .physical-fact {
@@ -312,6 +325,72 @@
   }
   .details-toggle .chevron { transition:transform .15s; display:inline-block; }
   .details-toggle.open .chevron { transform:rotate(90deg); }
+
+  /* RAW EVIDENCE: ground-truth eve.json/fast.log, kept separate from the
+     AI-narrative details above on purpose (forensic content, not model output) */
+  .evidence-pre, .evidence-fastlog {
+    font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text);
+    background:var(--bg3); border:1px solid var(--border); border-radius:6px;
+    padding:10px 12px; overflow-x:auto; line-height:1.5;
+  }
+  .evidence-pre { white-space:pre; }
+  .evidence-fastlog { white-space:pre-wrap; word-break:break-all; }
+  .evidence-none { font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--muted); font-style:italic; }
+
+  /* DISPOSITION: human-in-the-loop triage state, set by an operator, never by the AI */
+  .disposition-badge {
+    font-family:'JetBrains Mono',monospace; font-size:9px; font-weight:700;
+    letter-spacing:.06em; padding:2px 7px; border-radius:10px; flex-shrink:0;
+    text-transform:uppercase;
+  }
+  .disposition-badge.new                     { color:var(--muted);        background:var(--bg3); border:1px solid var(--border); }
+  .disposition-badge.acknowledged            { color:var(--blue);         background:rgba(88,166,255,.1); }
+  .disposition-badge.investigating           { color:var(--sev-medium);   background:rgba(227,179,65,.12); }
+  .disposition-badge.resolved_true_positive  { color:var(--sev-critical); background:rgba(248,81,73,.12); }
+  .disposition-badge.resolved_false_positive { color:var(--green);        background:rgba(63,185,80,.12); }
+
+  .disposition-block { margin-bottom:20px; }
+  .disposition-btn-row { display:flex; flex-wrap:wrap; gap:6px; margin-bottom:8px; }
+  .disposition-btn {
+    font-family:'JetBrains Mono',monospace; font-size:10px; font-weight:600;
+    color:var(--text); background:var(--bg3); border:1px solid var(--border);
+    padding:6px 10px; border-radius:6px; cursor:pointer; transition:border-color .15s,background .15s;
+  }
+  .disposition-btn:hover { border-color:var(--blue); background:rgba(88,166,255,.08); }
+  .disposition-btn.active { border-color:var(--blue); background:rgba(88,166,255,.14); color:var(--blue); }
+
+  .disposition-note-input {
+    width:100%; font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text);
+    background:var(--bg3); border:1px solid var(--border); border-radius:6px;
+    padding:6px 10px; margin-bottom:8px;
+  }
+  .disposition-note-input::placeholder { color:var(--muted); }
+
+  .disposition-history { display:flex; flex-direction:column; gap:4px; }
+  .disposition-history-item {
+    font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--muted);
+    display:flex; gap:8px; align-items:baseline;
+  }
+  .disposition-history-item .state { color:var(--text); font-weight:600; }
+
+  /* DETECTIONS IN A GROUP: one packet can trip several rules at once. Shared
+     facts (source/destination/protocol/physical effect/disposition) render
+     once above this list; each row below holds only what genuinely differs
+     per rule (its own narrative, MITRE pick, raw evidence), expandable. */
+  .detection-list { display:flex; flex-direction:column; gap:6px; margin-bottom:20px; }
+  .detection-row { border:1px solid var(--border); border-radius:8px; overflow:hidden; }
+  .detection-row-summary {
+    display:flex; align-items:center; gap:10px; padding:10px 12px; cursor:pointer;
+    transition:background .15s;
+  }
+  .detection-row-summary:hover { background:rgba(88,166,255,.05); }
+  .detection-row-msg {
+    flex:1; min-width:0; font-size:12px; color:var(--text); font-weight:600;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .detection-row-chevron { color:var(--muted); transition:transform .15s; flex-shrink:0; display:inline-block; }
+  .detection-row.open .detection-row-chevron { transform:rotate(90deg); }
+  .detection-row-detail { padding:4px 16px 16px 16px; border-top:1px solid var(--border); }
 
   .severity-block {
     display:flex; align-items:center; gap:12px;
@@ -368,6 +447,16 @@
     font-family:'JetBrains Mono',monospace; font-size:11px;
     color:var(--muted); text-align:center; padding:20px;
   }
+
+  /* AI DEGRADATION BANNER: the systemic, dashboard-wide version of CISA's
+     "threshold for defaulting back to non-AI systems", hidden unless the
+     recent schema-error/api-error rate actually crosses AI_DEGRADED_THRESHOLD */
+  .degraded-banner {
+    display:none; align-items:center; gap:10px;
+    padding:8px 20px; background:rgba(248,81,73,.12); border-bottom:1px solid rgba(248,81,73,.35);
+    font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:600; color:var(--sev-critical);
+  }
+  .degraded-banner.visible { display:flex; }
 </style>
 </head>
 <body>
@@ -390,6 +479,10 @@
     </div>
   </div>
 </header>
+
+<div class="degraded-banner" id="degraded-banner">
+  &#9888; <span id="degraded-banner-text">AI enrichment degraded, review raw Suricata evidence directly.</span>
+</div>
 
 <div class="main">
   <div class="timeline-panel">
@@ -423,31 +516,31 @@
 <script>
 const API_BASE = "http://localhost:5000";
 let allAlerts  = [];
-let selectedId = null;
-let connected  = false;
-let expandedGroups = new Set();
-let detailsOpen = false;   // collapsed by default; reset when a new alert is selected
+let selectedGroupId = null;
+let expandedGroups = new Set();         // timeline: which group cards show their member-row list
+let expandedMemberDetail = new Set();   // detail panel: which member ids show full narrative (multi-member groups only)
+let expandedMemberEvidence = new Set(); // detail panel: which member ids show raw eve.json/fast.log (multi-member groups only)
+let detailsOpen = false;   // single-member groups only; collapsed by default, reset on group switch
+let evidenceOpen = false;  // single-member groups only; collapsed by default, reset on group switch
 
 const SEV_RANK = { critical:3, high:2, medium:1, low:0 };
-const GROUP_WINDOW_MS = 500; // same src/dst/port within this window = one packet, multiple rules
 
-// alerts arrive newest-first; merge consecutive entries that share src/dst/port
-// and land within GROUP_WINDOW_MS of the group's anchor timestamp
+// group_id comes straight from the backend, the same flow_id-based key used
+// to share physical facts and cascade disposition across every rule that
+// fired on one packet (see group_key() in ics_alert_pipeline.py). Grouping by
+// it here is an exact match, not a client-side time-window guess.
 function groupAlerts(alerts) {
   const groups = [];
-  let current = null;
+  const byId = new Map();
   for (const a of alerts) {
-    const t = new Date(a.timestamp).getTime();
-    if (current &&
-        current.src_ip === a.src_ip &&
-        current.dest_ip === a.dest_ip &&
-        current.dest_port === a.dest_port &&
-        Math.abs(current.anchor - t) <= GROUP_WINDOW_MS) {
-      current.members.push(a);
-    } else {
-      current = { id: a.id, src_ip: a.src_ip, dest_ip: a.dest_ip, dest_port: a.dest_port, anchor: t, members: [a] };
-      groups.push(current);
+    const gid = a.group_id || a.id;
+    let g = byId.get(gid);
+    if (!g) {
+      g = { id: gid, src_ip: a.src_ip, dest_ip: a.dest_ip, dest_port: a.dest_port, members: [] };
+      byId.set(gid, g);
+      groups.push(g);
     }
+    g.members.push(a);
   }
   return groups;
 }
@@ -504,10 +597,11 @@ function setStatus(ok) {
   }
 }
 
-function renderSingleCard(a) {
+function renderSingleCard(g) {
+  const a = g.members[0];
   const severity = sev(a.analysis?.severity);
   return `
-    <div class="alert-card ${selectedId===a.id?'selected':''}" onclick="selectAlert('${a.id}')">
+    <div class="alert-card ${selectedGroupId===g.id?'selected':''}" onclick="selectGroup('${g.id}')">
       <div class="alert-card-inner">
         <div class="alert-top">
           <div class="sev-bar sev-${severity}"></div>
@@ -516,6 +610,7 @@ function renderSingleCard(a) {
             <div class="alert-ips">${a.src_ip}<span class="arrow">&rarr;</span>${a.dest_ip}:${a.dest_port}</div>
           </div>
           ${physicalChipHtml(a.analysis)}
+          ${dispositionBadgeHtml(a)}
           <div class="sev-label ${severity}">${severity.toUpperCase()}</div>
         </div>
         <div class="alert-time-sid">
@@ -534,7 +629,7 @@ function renderGroupCard(g) {
   const membersHtml = g.members.map(m => {
     const s = sev(m.analysis?.severity);
     return `
-      <div class="member-row ${selectedId===m.id?'selected':''}" onclick="event.stopPropagation(); selectAlert('${m.id}')">
+      <div class="member-row" onclick="event.stopPropagation(); selectGroup('${g.id}','${m.id}')">
         <div class="member-sev-dot ${s}"></div>
         <div class="member-msg">${m.msg}</div>
         <div class="sid-chip">sid:${m.sid}</div>
@@ -542,8 +637,8 @@ function renderGroupCard(g) {
     `;
   }).join('');
   return `
-    <div class="alert-card">
-      <div class="alert-card-inner" onclick="toggleGroupAndSelect('${g.id}','${headline.id}')">
+    <div class="alert-card ${selectedGroupId===g.id?'selected':''}">
+      <div class="alert-card-inner" onclick="toggleGroupAndSelect('${g.id}')">
         <div class="alert-top">
           <div class="sev-bar sev-${topSev}"></div>
           <div class="alert-meta">
@@ -551,6 +646,7 @@ function renderGroupCard(g) {
             <div class="alert-ips">${g.src_ip}<span class="arrow">&rarr;</span>${g.dest_ip}:${g.dest_port}</div>
           </div>
           ${physicalChipHtml(headline.analysis)}
+          ${dispositionBadgeHtml(headline)}
           <div class="group-count">&times;${g.members.length}</div>
           <div class="sev-label ${topSev}">${topSev.toUpperCase()}</div>
         </div>
@@ -571,16 +667,16 @@ function renderTimeline() {
     return;
   }
   const groups = groupAlerts(allAlerts);
-  container.innerHTML = groups.map(g => g.members.length > 1 ? renderGroupCard(g) : renderSingleCard(g.members[0])).join('');
+  container.innerHTML = groups.map(g => g.members.length > 1 ? renderGroupCard(g) : renderSingleCard(g)).join('');
 }
 
-function toggleGroupAndSelect(groupId, headlineId) {
+function toggleGroupAndSelect(groupId) {
   if (expandedGroups.has(groupId)) {
     expandedGroups.delete(groupId);
   } else {
     expandedGroups.add(groupId);
   }
-  selectAlert(headlineId);
+  selectGroup(groupId);
 }
 
 function mitreBadgeHtml(mitreStr) {
@@ -611,12 +707,38 @@ function physicalChipHtml(an) {
   return `<div class="physical-chip ${k}" title="${(PHYSICAL_LABELS[k]||'').replace(/&#\d+;\s*/,'')}">${PHYSICAL_ICON[k]}</div>`;
 }
 
+const DISPOSITION_LABELS = {
+  new: 'NEW', acknowledged: 'ACK', investigating: 'INVESTIGATING',
+  resolved_true_positive: 'RESOLVED: TP', resolved_false_positive: 'RESOLVED: FP',
+};
+
+// shown in the timeline list itself too, same reasoning as physicalChipHtml:
+// triage state should be visible before an operator even opens the alert
+function dispositionBadgeHtml(alert) {
+  const d = alert?.disposition || 'new';
+  const label = DISPOSITION_LABELS[d] || d.toUpperCase();
+  return `<div class="disposition-badge ${d}">${label}</div>`;
+}
+
+const EVIDENCE_COMPLETENESS_LABELS = {
+  full: 'FULL EVIDENCE', partial: 'PARTIAL EVIDENCE', none: 'NO EVIDENCE', not_applicable: 'N/A',
+};
+
+function evidenceCompletenessBadgeHtml(ec) {
+  if (!ec || !EVIDENCE_COMPLETENESS_LABELS[ec]) return '';
+  const title = ec === 'full' ? 'All live reads succeeded'
+    : ec === 'partial' ? 'Some live reads failed, weight this verdict cautiously'
+    : ec === 'none' ? 'All live reads failed, this verdict is not grounded'
+    : 'No write payload, nothing to read';
+  return `<div class="evidence-completeness-badge ${ec}" title="${title}">${EVIDENCE_COMPLETENESS_LABELS[ec]}</div>`;
+}
+
 function physicalBlockHtml(an) {
   const kind = an.physical_effect_assessment && PHYSICAL_LABELS[an.physical_effect_assessment]
     ? an.physical_effect_assessment : 'inconclusive';
   return `
     <div class="physical-block ${kind}">
-      <div class="physical-block-label">${PHYSICAL_LABELS[kind]}</div>
+      <div class="physical-block-label">${PHYSICAL_LABELS[kind]}${evidenceCompletenessBadgeHtml(an.evidence_completeness)}</div>
       <div class="physical-block-desc">${an.physical_effect_reason ?? ''}</div>
       <div class="physical-facts">
         <div class="physical-fact"><span class="physical-fact-label">Command sent</span><span class="physical-fact-value">${an.command_attempted ?? ''}</span></div>
@@ -627,43 +749,151 @@ function physicalBlockHtml(an) {
   `;
 }
 
-function renderAnalysis(alert) {
-  const an = alert.analysis ?? {};
-  const severity = an.severity ?? 'unknown';
-  const immediate = Array.isArray(an.immediate_actions) ? an.immediate_actions : [];
-  const after     = Array.isArray(an.after_neutralized_actions) ? an.after_neutralized_actions : [];
-  const tags      = Array.isArray(an.tags) ? an.tags : [];
-  // command_attempted / register_observed / physical_indicator are stored on
-  // the alert itself (deterministic facts), not inside analysis (the model's
-  // output), so the physical-effect block reads from both.
-  const physical = { ...an, command_attempted: alert.command_attempted, register_observed: alert.register_observed, physical_indicator: alert.physical_indicator };
+// raw_eve_json/fast_log_line come straight from the network packet, so they
+// are attacker-influenced text — escape before interpolating into innerHTML.
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
 
+function evidenceBlockHtml(alert) {
+  const rawJson = alert.raw_eve_json ? JSON.stringify(alert.raw_eve_json, null, 2) : null;
+  const fastLog = alert.fast_log_line;
+  return `
+    <div class="analysis-section">
+      <div class="section-label">Raw eve.json</div>
+      ${rawJson ? `<pre class="evidence-pre">${escapeHtml(rawJson)}</pre>` : `<div class="evidence-none">No raw alert data available.</div>`}
+    </div>
+    <div class="analysis-section">
+      <div class="section-label">fast.log line</div>
+      ${fastLog ? `<pre class="evidence-fastlog">${escapeHtml(fastLog)}</pre>` : `<div class="evidence-none">No matching fast.log line found.</div>`}
+    </div>
+  `;
+}
+
+// human-in-the-loop triage: set by an operator clicking a button here, never
+// by the model. disposition_history is the audit trail of who reviewed this
+// alert and when, kept separate from the AI's own analysis entirely.
+function dispositionBlockHtml(alert) {
+  const current = alert.disposition || 'new';
+  const history = Array.isArray(alert.disposition_history) ? alert.disposition_history : [];
+  const btn = (state, label) => `<button class="disposition-btn ${current===state?'active':''}" onclick="updateDisposition('${alert.id}','${state}')">${label}</button>`;
+  const historyHtml = history.slice().reverse().map(h => `
+    <div class="disposition-history-item">
+      <span class="state">${DISPOSITION_LABELS[h.state] || h.state}</span>
+      <span>${fmtFull(h.timestamp)}</span>
+      ${h.note ? `<span>&ldquo;${escapeHtml(h.note)}&rdquo;</span>` : ''}
+    </div>
+  `).join('');
+  return `
+    <div class="disposition-block">
+      <div class="section-label">Analyst Disposition</div>
+      <input type="text" id="disposition-note" class="disposition-note-input" placeholder="Optional note (sent with the next status change below)">
+      <div class="disposition-btn-row">
+        ${btn('acknowledged','Acknowledge')}
+        ${btn('investigating','Investigating')}
+        ${btn('resolved_true_positive','Resolve: True Positive')}
+        ${btn('resolved_false_positive','Resolve: False Positive')}
+      </div>
+      ${history.length ? `<div class="disposition-history">${historyHtml}</div>` : ''}
+    </div>
+  `;
+}
+
+async function updateDisposition(id, state) {
+  const noteInput = document.getElementById('disposition-note');
+  const note = noteInput ? noteInput.value : '';
+  try {
+    const res = await fetch(`${API_BASE}/alerts/${id}/disposition`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ disposition: state, note }),
+    });
+    if (!res.ok) throw new Error('disposition update failed: ' + res.status);
+    const body = await res.json();
+
+    if (body.removed) {
+      // resolved: the whole correlated group is cleared, nothing is saved,
+      // by design (this is a working lab, not a system of record)
+      allAlerts = allAlerts.filter(a => !body.ids.includes(a.id));
+      if (selectedGroupId === body.group_id) selectedGroupId = null;
+      expandedGroups.delete(body.group_id);
+      updateHeaderCounts(allAlerts);
+      renderTimeline();
+      if (selectedGroupId === null) {
+        renderEmptyAnalysis('Alert group resolved and cleared.<br>Select another alert from the timeline.');
+      }
+    } else {
+      for (const updated of body.alerts) {
+        const idx = allAlerts.findIndex(a => a.id === updated.id);
+        if (idx !== -1) allAlerts[idx] = updated;
+      }
+      renderTimeline();
+      const g = getSelectedGroup();
+      if (g) renderAnalysis(g);
+    }
+  } catch (e) {
+    console.error('Failed to update disposition', e);
+  }
+}
+
+function getSelectedGroup() {
+  if (selectedGroupId === null) return null;
+  return groupAlerts(allAlerts).find(g => g.id === selectedGroupId) || null;
+}
+
+function renderEmptyAnalysis(message) {
   document.getElementById('analysis-panel').innerHTML = `
+    <div class="empty-state">
+      <div class="empty-icon">&#x2B21;</div>
+      <div class="empty-text">${message}</div>
+    </div>
+  `;
+}
+
+// Shared context (source/destination/protocol, physical effect, disposition)
+// renders once per group here, driven by the highest-severity member, since
+// it's identical across every member of a correlated group already (see
+// gather_physical_facts()/group_key() in ics_alert_pipeline.py). What
+// actually differs per rule (its own narrative, MITRE pick, raw evidence)
+// lives in the per-member list below instead of being repeated per card.
+function renderAnalysis(group) {
+  const members = group.members;
+  const top = headlineOf(members);
+  const topSev = sev(top.analysis?.severity);
+  const physical = { ...top.analysis, command_attempted: top.command_attempted, register_observed: top.register_observed, physical_indicator: top.physical_indicator, evidence_completeness: top.evidence_completeness };
+  const immediate = Array.isArray(top.analysis?.immediate_actions) ? top.analysis.immediate_actions : [];
+  const multiNote = members.length > 1
+    ? ` <span style="color:var(--muted);font-weight:500;">(+${members.length-1} more rule${members.length>2?'s':''} on this packet)</span>`
+    : '';
+
+  const sharedHtml = `
     <div class="analysis-alert-header">
-      <div class="analysis-sev-bar sev-${sev(severity)}"></div>
+      <div class="analysis-sev-bar sev-${topSev}"></div>
       <div>
-        <div class="analysis-alert-title">${alert.msg}</div>
-        <div class="headline-text">${an.headline ?? ''}</div>
+        <div class="analysis-alert-title">${top.msg}${multiNote}</div>
+        <div class="headline-text">${top.analysis?.headline ?? ''}</div>
         <div class="analysis-meta-row">
-          <div class="meta-item"><div class="meta-label">Timestamp</div><div class="meta-value">${fmtFull(alert.timestamp)}</div></div>
-          <div class="meta-item"><div class="meta-label">Source</div><div class="meta-value">${alert.src_ip}:${alert.src_port}</div></div>
-          <div class="meta-item"><div class="meta-label">Destination</div><div class="meta-value">${alert.dest_ip}:${alert.dest_port}</div></div>
-          <div class="meta-item"><div class="meta-label">Protocol</div><div class="meta-value">${alert.proto}</div></div>
-          <div class="meta-item"><div class="meta-label">Rule SID</div><div class="meta-value">${alert.sid}</div></div>
+          <div class="meta-item"><div class="meta-label">Timestamp</div><div class="meta-value">${fmtFull(top.timestamp)}</div></div>
+          <div class="meta-item"><div class="meta-label">Source</div><div class="meta-value">${top.src_ip}:${top.src_port}</div></div>
+          <div class="meta-item"><div class="meta-label">Destination</div><div class="meta-value">${top.dest_ip}:${top.dest_port}</div></div>
+          <div class="meta-item"><div class="meta-label">Protocol</div><div class="meta-value">${top.proto}</div></div>
+          ${members.length === 1 ? `<div class="meta-item"><div class="meta-label">Rule SID</div><div class="meta-value">${top.sid}</div></div>` : ''}
         </div>
       </div>
     </div>
 
+    ${dispositionBlockHtml(top)}
+
     <div class="ai-badge">&#x2B21; Claude Sonnet 4.6 &middot; AI Analysis</div>
 
-    <div class="severity-block ${sev(severity)}">
-      <div class="severity-block-label ${sev(severity)}">${severity.toUpperCase()} SEVERITY</div>
-      <div class="severity-block-desc">${an.severity_reason ?? ''}</div>
+    <div class="severity-block ${topSev}">
+      <div class="severity-block-label ${topSev}">${topSev.toUpperCase()} SEVERITY</div>
+      <div class="severity-block-desc">${top.analysis?.severity_reason ?? ''}</div>
     </div>
 
     ${physicalBlockHtml(physical)}
-
-    ${mitreBadgeHtml(an.mitre_technique)}
 
     <div class="immediate-block">
       <div class="section-label">Do Now</div>
@@ -671,6 +901,21 @@ function renderAnalysis(alert) {
         ${immediate.map((act,i)=>`<li class="action-item"><div class="action-num">${i+1}</div><div>${act}</div></li>`).join('')}
       </ul>
     </div>
+  `;
+
+  const detailHtml = members.length === 1 ? renderSingleMemberDetail(top) : renderMultiMemberDetail(members);
+  document.getElementById('analysis-panel').innerHTML = sharedHtml + detailHtml;
+}
+
+// The common case: one rule, one alert. Same layout this project has always
+// used for narrative detail, just now a function of its own since the group
+// case below needs a much more compact version of it per row.
+function renderSingleMemberDetail(alert) {
+  const an = alert.analysis ?? {};
+  const after = Array.isArray(an.after_neutralized_actions) ? an.after_neutralized_actions : [];
+  const tags  = Array.isArray(an.tags) ? an.tags : [];
+  return `
+    ${mitreBadgeHtml(an.mitre_technique)}
 
     <button class="details-toggle ${detailsOpen ? 'open' : ''}" onclick="toggleDetails()">
       <span class="chevron">&#9656;</span>${detailsOpen ? 'Hide' : 'Show'} details (what happened, why, tags, after-action items)
@@ -698,21 +943,122 @@ function renderAnalysis(alert) {
         <div class="tag-row">${tags.map(t=>`<span class="tag">${t}</span>`).join('')}</div>
       </div>
     </div>
+
+    <button class="details-toggle ${evidenceOpen ? 'open' : ''}" onclick="toggleEvidence()">
+      <span class="chevron">&#9656;</span>${evidenceOpen ? 'Hide' : 'Show'} raw evidence (eve.json + fast.log, for manual verification)
+    </button>
+    <div id="evidence-content" style="${evidenceOpen ? '' : 'display:none'}">
+      ${evidenceBlockHtml(alert)}
+    </div>
+  `;
+}
+
+// Multi-rule case: one compact row per rule, collapsed by default except
+// whichever member was explicitly clicked (see selectGroup). Expanding a row
+// reveals that rule's own narrative, MITRE pick, and its own raw-evidence
+// sub-toggle, each genuinely different per rule even on a shared packet.
+function renderMultiMemberDetail(members) {
+  const rows = members.map(m => {
+    const s = sev(m.analysis?.severity);
+    const open = expandedMemberDetail.has(m.id);
+    const evOpen = expandedMemberEvidence.has(m.id);
+    const an = m.analysis ?? {};
+    const after = Array.isArray(an.after_neutralized_actions) ? an.after_neutralized_actions : [];
+    const tags  = Array.isArray(an.tags) ? an.tags : [];
+    return `
+      <div class="detection-row ${open?'open':''}">
+        <div class="detection-row-summary" onclick="toggleMemberDetail('${m.id}')">
+          <div class="member-sev-dot ${s}"></div>
+          <div class="sid-chip">sid:${m.sid}</div>
+          <div class="detection-row-msg">${m.msg}</div>
+          <div class="sev-label ${s}">${s.toUpperCase()}</div>
+          <span class="detection-row-chevron">&#9656;</span>
+        </div>
+        ${open ? `
+        <div class="detection-row-detail">
+          <div class="headline-text" style="font-size:13px;margin-bottom:10px;">${an.headline ?? ''}</div>
+          ${mitreBadgeHtml(an.mitre_technique)}
+          <div class="analysis-section">
+            <div class="section-label">What Happened</div>
+            <div class="analysis-text">${an.what_happened ?? ''}</div>
+          </div>
+          <div class="analysis-section">
+            <div class="section-label">Likely Attack</div>
+            <div class="analysis-text">${an.likely_attack ?? ''}</div>
+          </div>
+          <div class="analysis-section">
+            <div class="section-label">After Threat Is Neutralized</div>
+            <ul class="after-list">
+              ${after.map(act=>`<li class="after-item">${act}</li>`).join('')}
+            </ul>
+          </div>
+          <div class="analysis-section">
+            <div class="section-label">Tags</div>
+            <div class="tag-row">${tags.map(t=>`<span class="tag">${t}</span>`).join('')}</div>
+          </div>
+          <button class="details-toggle ${evOpen ? 'open' : ''}" onclick="event.stopPropagation(); toggleMemberEvidence('${m.id}')">
+            <span class="chevron">&#9656;</span>${evOpen ? 'Hide' : 'Show'} raw evidence for this rule
+          </button>
+          <div style="${evOpen ? '' : 'display:none'}">
+            ${evidenceBlockHtml(m)}
+          </div>
+        </div>` : ''}
+      </div>
+    `;
+  }).join('');
+
+  return `
+    <div class="analysis-section">
+      <div class="section-label">Detections in This Group (${members.length})</div>
+      <div class="detection-list">${rows}</div>
+    </div>
   `;
 }
 
 function toggleDetails() {
   detailsOpen = !detailsOpen;
-  const alert = allAlerts.find(a => a.id === selectedId);
-  if (alert) renderAnalysis(alert);
+  const g = getSelectedGroup();
+  if (g) renderAnalysis(g);
 }
 
-function selectAlert(id) {
-  if (id !== selectedId) detailsOpen = false;   // collapse details when switching alerts
-  selectedId = id;
+function toggleEvidence() {
+  evidenceOpen = !evidenceOpen;
+  const g = getSelectedGroup();
+  if (g) renderAnalysis(g);
+}
+
+function toggleMemberDetail(id) {
+  if (expandedMemberDetail.has(id)) expandedMemberDetail.delete(id); else expandedMemberDetail.add(id);
+  const g = getSelectedGroup();
+  if (g) renderAnalysis(g);
+}
+
+function toggleMemberEvidence(id) {
+  if (expandedMemberEvidence.has(id)) expandedMemberEvidence.delete(id); else expandedMemberEvidence.add(id);
+  const g = getSelectedGroup();
+  if (g) renderAnalysis(g);
+}
+
+function selectGroup(groupId, focusMemberId) {
+  if (groupId !== selectedGroupId) {
+    detailsOpen = false;
+    evidenceOpen = false;
+    expandedMemberDetail.clear();
+    expandedMemberEvidence.clear();
+  }
+  selectedGroupId = groupId;
+  if (focusMemberId) expandedMemberDetail.add(focusMemberId);
   renderTimeline();
-  const alert = allAlerts.find(a => a.id === id);
-  if (alert) renderAnalysis(alert);
+  const g = getSelectedGroup();
+  if (g) renderAnalysis(g);
+  else renderEmptyAnalysis('Select an alert from the timeline<br>to see the AI-powered analysis.');
+}
+
+function updateHeaderCounts(data) {
+  document.getElementById('total-count').textContent = data.length;
+  document.getElementById('critical-count').textContent = data.filter(a=>a.analysis?.severity==='critical').length;
+  document.getElementById('high-count').textContent  = data.filter(a=>a.analysis?.severity==='high').length;
+  document.getElementById('badge-count').textContent = data.length;
 }
 
 async function fetchAlerts() {
@@ -721,23 +1067,27 @@ async function fetchAlerts() {
     const data = await res.json();
     setStatus(true);
 
-    const prev = allAlerts.length;
+    const prevLen = allAlerts.length;
     allAlerts = data;
 
-    document.getElementById('total-count').textContent = data.length;
-    document.getElementById('critical-count').textContent = data.filter(a=>a.analysis?.severity==='critical').length;
-    document.getElementById('high-count').textContent  = data.filter(a=>a.analysis?.severity==='high').length;
-    document.getElementById('badge-count').textContent = data.length;
+    updateHeaderCounts(data);
     document.getElementById('last-update').textContent = 'Last update: ' + new Date().toLocaleTimeString('en-US',{hour12:false});
+
+    const groups = groupAlerts(data);
+    const stillSelected = selectedGroupId !== null && groups.some(g => g.id === selectedGroupId);
 
     renderTimeline();
 
-    // auto-select newest alert if none selected or new alert arrived
-    if (data.length > 0 && (selectedId === null || data.length > prev)) {
-      const groups = groupAlerts(data);
-      const g = groups.find(gr => gr.members.some(m => m.id === data[0].id));
-      if (g && g.members.length > 1) expandedGroups.add(g.id);
-      selectAlert(data[0].id);
+    if (groups.length > 0 && (selectedGroupId === null || !stillSelected || data.length > prevLen)) {
+      // auto-select the newest group: the newest alert is data[0]
+      const newest = groups.find(g => g.members.some(m => m.id === data[0].id)) || groups[0];
+      if (newest.members.length > 1) expandedGroups.add(newest.id);
+      selectGroup(newest.id);
+    } else if (groups.length === 0) {
+      selectedGroupId = null;
+      renderEmptyAnalysis('Select an alert from the timeline<br>to see the AI-powered analysis.');
+    } else {
+      renderAnalysis(getSelectedGroup());
     }
 
   } catch {
@@ -745,9 +1095,33 @@ async function fetchAlerts() {
   }
 }
 
+// Dashboard-wide failsafe banner, separate from fetchAlerts: this is the
+// systemic signal (CISA 3.4/4.2's "threshold for defaulting back to non-AI
+// systems"), not something an operator should have to notice by spotting
+// schema-error/api-error tags scattered across individual cards.
+async function fetchStatus() {
+  try {
+    const res = await fetch(`${API_BASE}/status`, { signal: AbortSignal.timeout(3000) });
+    const status = await res.json();
+    const banner = document.getElementById('degraded-banner');
+    if (status.ai_degraded) {
+      const pct = Math.round((status.recent_error_rate ?? 0) * 100);
+      document.getElementById('degraded-banner-text').textContent =
+        `AI enrichment degraded, ${pct}% of recent alerts failed enrichment, review raw Suricata evidence directly.`;
+      banner.classList.add('visible');
+    } else {
+      banner.classList.remove('visible');
+    }
+  } catch {
+    // a failed /status poll says nothing about AI health, leave the banner as-is
+  }
+}
+
 // poll every 3 seconds
 fetchAlerts();
+fetchStatus();
 setInterval(fetchAlerts, 3000);
+setInterval(fetchStatus, 3000);
 </script>
 </body>
 </html>

@@ -28,17 +28,25 @@ from datetime import datetime, timezone
 from collections import deque
 
 import anthropic
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 # ─── CONFIG ──────────────────────────────────────────────────────────────────
 
 EVE_LOG_PATH   = "/var/log/suricata/eve.json"
+FAST_LOG_PATH  = "/var/log/suricata/fast.log"
 API_KEY        = os.environ.get("ANTHROPIC_API_KEY", "")
 MODEL          = "claude-sonnet-4-6"
 MAX_ALERTS     = 50          # keep the last N enriched alerts in memory
 RATE_LIMIT_SEC = 30          # minimum seconds between API calls for the same sid
 POLL_INTERVAL  = 0.5         # how often (seconds) to check eve.json for new lines
+
+# Durable, append-only record of every enrichment call (success or failure),
+# separate from the in-memory `alerts` deque, which caps at MAX_ALERTS and is
+# gone on restart. AI_ACTOR_ID is logged distinctly from the "human" actor tag
+# used on disposition updates below, so the two are never confused in review.
+AI_AUDIT_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ai_audit.jsonl")
+AI_ACTOR_ID       = f"ai:ics_alert_pipeline:{MODEL}"
 
 # This pipeline runs on the host, which sits on a different subnet than the
 # macvlan ICS network and cannot reach the PLC directly (confirmed by testing:
@@ -234,6 +242,13 @@ last_call     = {}                          # sid -> timestamp of last API call
 alerts_lock   = threading.Lock()
 client        = anthropic.Anthropic(api_key=API_KEY) if API_KEY else None
 
+# Rolling window of the last N enrichment outcomes ("success" | "schema-error"
+# | "api-error"), so a failure *rate* is visible system-wide instead of only
+# as a tag buried on individual cards. This is the concrete version of CISA's
+# "thresholds for defaulting back to non-AI systems" (Principles 3.4/4.2).
+recent_outcomes     = deque(maxlen=20)
+AI_DEGRADED_THRESHOLD = 0.3
+
 # ─── FLASK APP ────────────────────────────────────────────────────────────────
 
 app = Flask(__name__)
@@ -246,13 +261,80 @@ def get_alerts():
 
 @app.route("/status")
 def status():
+    error_rate = (
+        sum(1 for o in recent_outcomes if o != "success") / len(recent_outcomes)
+        if recent_outcomes else 0.0
+    )
     return jsonify({
         "suricata_log": EVE_LOG_PATH,
         "model": MODEL,
         "alerts_in_memory": len(alerts),
         "api_connected": client is not None,
         "timestamp": datetime.now(timezone.utc).isoformat(),
+        "ai_degraded": error_rate > AI_DEGRADED_THRESHOLD,
+        "recent_error_rate": error_rate,
     })
+
+# Analyst triage states for the human-in-the-loop disposition workflow. CISA's
+# own AI-in-OT guidance (Principle 4.1, Human-in-the-Loop Decision-Making)
+# calls for operators to be involved in decision-making on AI-assisted alerts,
+# not just shown the AI's output; this is what records that a human actually
+# looked, not just that one could have.
+_VALID_DISPOSITIONS = {
+    "new", "acknowledged", "investigating",
+    "resolved_true_positive", "resolved_false_positive",
+}
+
+
+@app.route("/alerts/<alert_id>/disposition", methods=["POST"])
+def set_disposition(alert_id):
+    """Update (or resolve) the disposition of the whole correlated group that
+    alert_id belongs to, not just that one alert. One attack packet commonly
+    trips several rules at once (see group_key()); triaging each one
+    separately, with the same packet showing a true positive under one SID
+    and a false positive under another, isn't how real correlated-alert
+    triage works, so a single disposition decision here applies to every
+    member sharing the same group_id.
+
+    Resolving (either outcome) deletes the whole group outright rather than
+    just marking it, this is a working lab, not a system of record, and
+    keeping closed alerts around only to let them quietly age out of the
+    MAX_ALERTS ring buffer later serves no one."""
+    body = request.get_json(silent=True) or {}
+    disposition = body.get("disposition")
+    note = body.get("note", "")
+    if disposition not in _VALID_DISPOSITIONS:
+        return jsonify({"error": f"disposition must be one of {sorted(_VALID_DISPOSITIONS)}"}), 400
+
+    with alerts_lock:
+        target = next((a for a in alerts if a["id"] == alert_id), None)
+        if target is None:
+            return jsonify({"error": "alert not found"}), 404
+
+        group_id = target["group_id"]
+        group_members = [a for a in alerts if a["group_id"] == group_id]
+
+        if disposition.startswith("resolved_"):
+            remaining = [a for a in alerts if a["group_id"] != group_id]
+            alerts.clear()
+            alerts.extend(remaining)
+            return jsonify({
+                "group_id": group_id,
+                "removed": True,
+                "ids": [a["id"] for a in group_members],
+            })
+
+        history_entry = {
+            "state": disposition,
+            "actor": "human",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "note": note,
+        }
+        for a in group_members:
+            a["disposition"] = disposition
+            a["disposition_history"].append(history_entry)
+
+        return jsonify({"group_id": group_id, "removed": False, "alerts": group_members})
 
 # ─── ALERT ENRICHMENT ────────────────────────────────────────────────────────
 
@@ -394,6 +476,96 @@ def gather_physical_facts(raw: dict) -> tuple[str, str, str]:
     return command_attempted, register_observed, physical_indicator
 
 
+# How much of fast.log to read when looking for a matching line. fast.log is
+# append-only and grows unbounded across a session, so seeking from the end
+# keeps this cheap no matter how long the lab has been running.
+FAST_LOG_TAIL_BYTES = 1_000_000
+
+
+def _find_fast_log_line(raw: dict, tolerance_sec: float = 2.0) -> str | None:
+    """Best-effort match of one eve.json alert to its corresponding
+    human-readable fast.log line, by signature ID, source/destination IP, and
+    timestamp proximity. fast.log carries no flow_id or other structured join
+    key, so this is a heuristic, not a guaranteed join: returns None rather
+    than a low-confidence guess when nothing matches within tolerance_sec,
+    consistent with this project's rule against claiming more certainty than
+    the facts support."""
+    sid = raw.get("alert", {}).get("signature_id")
+    src_ip = raw.get("src_ip")
+    dest_ip = raw.get("dest_ip")
+    if sid is None or src_ip is None or dest_ip is None:
+        return None
+
+    try:
+        alert_naive = datetime.fromisoformat(raw.get("timestamp", "")).replace(tzinfo=None)
+    except ValueError:
+        return None
+
+    sid_marker = f"[1:{sid}:"
+
+    try:
+        with open(FAST_LOG_PATH, "rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - FAST_LOG_TAIL_BYTES))
+            chunk = f.read().decode("utf-8", errors="replace")
+    except OSError:
+        return None
+
+    best_line, best_delta = None, None
+    for line in chunk.splitlines():
+        if sid_marker not in line or src_ip not in line or dest_ip not in line:
+            continue
+        # fast.log format: "<ts>  [**] [gid:sid:rev] <msg> [**] ..."
+        line_ts = line.split("  ", 1)[0]
+        try:
+            line_dt = datetime.strptime(line_ts, "%m/%d/%Y-%H:%M:%S.%f")
+        except ValueError:
+            continue
+        delta = abs((line_dt - alert_naive).total_seconds())
+        if delta <= tolerance_sec and (best_delta is None or delta < best_delta):
+            best_line, best_delta = line, delta
+
+    return best_line
+
+
+_UNAVAILABLE_MARKER = "unavailable"
+
+
+def _evidence_completeness(command_attempted: str, register_observed: str, physical_indicator: str) -> str:
+    """Code-computed signal for how much of physical_effect_assessment's own
+    grounding actually resolved, never asked of the model, same philosophy as
+    _apply_severity_floor: compute what can be computed in code rather than
+    trust the model to self-report something it can get wrong. Answers CISA
+    1.1's "Lack of Explainability" risk by making the AI's evidence basis
+    visible instead of buried in a paragraph of prose."""
+    if command_attempted.startswith("No write payload parsed"):
+        return "not_applicable"   # recon/catch-all: nothing to read in the first place
+
+    reads = (register_observed, physical_indicator)
+    failed = sum(1 for r in reads if _UNAVAILABLE_MARKER in r)
+    if failed == 0:
+        return "full"
+    if failed == len(reads):
+        return "none"
+    return "partial"
+
+
+def _write_ai_audit_log(entry: dict) -> None:
+    """Append one durable, forensic record of an enrichment call to
+    AI_AUDIT_LOG_PATH. Plain append-only JSONL, same spirit as eve.json/
+    fast.log already being plain-text and greppable, not a database. Called
+    on every enrich_alert() outcome, success, schema-error, and api-error
+    alike, since CISA's guidance asks for AI decisions to be trackable "for
+    compliance and forensic analysis" and a failure is as auditable as a
+    success."""
+    try:
+        with open(AI_AUDIT_LOG_PATH, "a") as f:
+            f.write(json.dumps(entry) + "\n")
+    except OSError as e:
+        print(f"[!] Could not write AI audit log: {e}")
+
+
 def group_key(raw: dict) -> str:
     """Key that identifies 'the same packet' across multiple matched rules.
     Suricata assigns one flow_id per TCP flow and fires all matching rules
@@ -454,13 +626,20 @@ Physical indicator   : {physical_indicator}
 
 Analyze this alert for this specific ICS environment."""
 
+    outcome = "success"   # success | schema-error | api-error, recorded in the audit log below
+
     try:
         response = client.messages.create(
             model=MODEL,
             max_tokens=1500,
-            system=SYSTEM_PROMPT,
+            # SYSTEM_PROMPT and the tool schema are identical on every call and
+            # large (full topology, rule catalog, MITRE hints); cache_control
+            # marks each as a cache breakpoint so Anthropic reuses them instead
+            # of re-billing full input tokens every time. Cuts cost on both
+            # live alerts and eval runs, since both call this same function.
+            system=[{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
             messages=[{"role": "user", "content": user_message}],
-            tools=[ALERT_ANALYSIS_TOOL],
+            tools=[{**ALERT_ANALYSIS_TOOL, "cache_control": {"type": "ephemeral"}}],
             tool_choice={"type": "tool", "name": "submit_alert_analysis"},
         )
 
@@ -475,6 +654,7 @@ Analyze this alert for this specific ICS environment."""
     except ValueError as e:
         # debug: print what Claude actually sent so you can see what went wrong
         print(f"[!] Schema error from Claude for sid {sid}: {e}")
+        outcome = "schema-error"
         analysis = {
             "severity": "medium",
             "headline": f"AI analysis failed for sid {sid} (schema error).",
@@ -495,6 +675,7 @@ Analyze this alert for this specific ICS environment."""
         }
     except Exception as e:
         print(f"[!] API error for sid {sid}: {e}")
+        outcome = "api-error"
         analysis = {
             "severity": "medium",
             "headline": f"AI analysis unavailable for sid {sid} (API error).",
@@ -514,6 +695,7 @@ Analyze this alert for this specific ICS environment."""
             "tags": ["api-error", f"sid-{sid}"],
         }
 
+    raw_tool_output = dict(analysis)   # before the floor mutates it in place, for the audit log below
     analysis = _apply_severity_floor(sid, analysis)
 
     enriched = {
@@ -526,13 +708,42 @@ Analyze this alert for this specific ICS environment."""
         "dest_ip": dst,
         "dest_port": dport,
         "proto": proto,
+        # same key used in _flush_group to take physical facts once per packet
+        # (see group_key() above); exposing it lets the dashboard group by this
+        # exact server-side key instead of guessing from a time window, and
+        # lets /alerts/<id>/disposition cascade a status change across every
+        # rule that fired on the same packet, rather than one at a time.
+        "group_id": group_key(raw),
+        # human-in-the-loop triage state (CISA 4.1): starts "new", updated via
+        # POST /alerts/<id>/disposition as an operator actually reviews it.
+        "disposition": "new",
+        "disposition_history": [],
         # deterministic facts, gathered in code, not by the model, so they're
         # true regardless of whether the Claude call itself succeeded.
         "command_attempted": command_attempted,
         "register_observed": register_observed,
         "physical_indicator": physical_indicator,
+        "evidence_completeness": _evidence_completeness(command_attempted, register_observed, physical_indicator),
         "analysis": analysis,
+        # ground-truth evidence for manual verification, kept separate from
+        # the model's own narrative above — see the Alert Evidence Trail plan.
+        "raw_eve_json": raw,
+        "fast_log_line": _find_fast_log_line(raw),
     }
+
+    _write_ai_audit_log({
+        "logged_at": datetime.now(timezone.utc).isoformat(),
+        "alert_timestamp": ts,
+        "alert_id": enriched["id"],
+        "sid": sid,
+        "actor": AI_ACTOR_ID,
+        "outcome": outcome,
+        "user_message": user_message,
+        "raw_tool_output": raw_tool_output,
+        "final_analysis": analysis,
+        "severity_floor_applied": "severity-floor-applied" in analysis.get("tags", []),
+    })
+    recent_outcomes.append(outcome)
 
     print(f"[+] Enriched alert: sid={sid} | {msg} | severity={analysis.get('severity','?')}")
     return enriched
