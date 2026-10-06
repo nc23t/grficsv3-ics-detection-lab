@@ -1,36 +1,40 @@
 {
-  "case_id": "005_recon_scan",
-  "sid": 1000006,
-  "note": "12 rapid TCP connect() attempts to port 502 from Kali, tripping the threshold rule (10 SYNs / 10s). Precursor recon, not direct process manipulation, so the floor is lower than the write rules.",
-  "expect": {
-    "severity_min": "medium",
-    "mitre_technique_id": "T0846",
-    "category": "reconnaissance"
-  },
-  "text_checks": {
-    "severity_reason": {
-      "min_len": 20,
-      "max_len": 650
+    "case_id": "005_recon_scan",
+    "sid": 1000006,
+    "note": "12 rapid TCP connect() attempts to port 502 from Kali, tripping the threshold rule (10 SYNs / 10s). Precursor recon, not direct process manipulation, so the floor is lower than the write rules.",
+    "expect": {
+        "severity_min": "medium",
+        "mitre_technique_id": "T0846",
+        "category": "reconnaissance"
     },
-    "what_happened": {
-      "min_len": 40,
-      "max_len": 800,
-      "required_keywords": [
-        "502"
-      ]
+    "text_checks": {
+        "severity_reason": {
+            "min_len": 20,
+            "max_len": 650
+        },
+        "what_happened": {
+            "min_len": 40,
+            "max_len": 800,
+            "required_keywords": [
+                "502"
+            ]
+        },
+        "likely_attack": {
+            "min_len": 20,
+            "max_len": 650
+        }
     },
-    "likely_attack": {
-      "min_len": 20,
-      "max_len": 650
+    "array_checks": {
+        "tags": {
+            "min_items": 1
+        },
+        "immediate_actions": {
+            "min_items": 1,
+            "max_items": 4
+        },
+        "after_neutralized_actions": {
+            "min_items": 1,
+            "max_items": 4
+        }
     }
-  },
-  "array_checks": {
-    "actions": {
-      "min_items": 1,
-      "max_items": 10
-    },
-    "tags": {
-      "min_items": 1
-    }
-  }
 }

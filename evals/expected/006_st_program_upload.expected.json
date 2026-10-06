@@ -1,37 +1,41 @@
 {
-  "case_id": "006_st_program_upload",
-  "sid": 1000003,
-  "note": "Synthetic input (see _frozen_input_note in the input file). Highest-impact rule in the catalog, full control logic replacement, so severity has nowhere to go but critical: the floor and the ceiling are the same value here, which makes an exact match safe rather than brittle.",
-  "expect": {
-    "severity": "critical",
-    "mitre_technique_id": "T0821",
-    "category": "program-tampering",
-    "requires_human_review": true
-  },
-  "text_checks": {
-    "severity_reason": {
-      "min_len": 20,
-      "max_len": 650
+    "case_id": "006_st_program_upload",
+    "sid": 1000003,
+    "note": "Synthetic input (see _frozen_input_note in the input file). Highest-impact rule in the catalog, full control logic replacement, so severity has nowhere to go but critical: the floor and the ceiling are the same value here, which makes an exact match safe rather than brittle.",
+    "expect": {
+        "severity": "critical",
+        "mitre_technique_id": "T0821",
+        "category": "program-tampering",
+        "requires_human_review": true
     },
-    "what_happened": {
-      "min_len": 40,
-      "max_len": 800,
-      "required_keywords": [
-        "upload"
-      ]
+    "text_checks": {
+        "severity_reason": {
+            "min_len": 20,
+            "max_len": 650
+        },
+        "what_happened": {
+            "min_len": 40,
+            "max_len": 800,
+            "required_keywords": [
+                "upload"
+            ]
+        },
+        "likely_attack": {
+            "min_len": 20,
+            "max_len": 650
+        }
     },
-    "likely_attack": {
-      "min_len": 20,
-      "max_len": 650
+    "array_checks": {
+        "tags": {
+            "min_items": 1
+        },
+        "immediate_actions": {
+            "min_items": 1,
+            "max_items": 4
+        },
+        "after_neutralized_actions": {
+            "min_items": 1,
+            "max_items": 4
+        }
     }
-  },
-  "array_checks": {
-    "actions": {
-      "min_items": 1,
-      "max_items": 10
-    },
-    "tags": {
-      "min_items": 1
-    }
-  }
 }

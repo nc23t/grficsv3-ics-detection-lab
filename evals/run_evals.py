@@ -17,6 +17,7 @@ USAGE
   python3 evals/run_evals.py
 """
 
+import argparse
 import json
 import re
 import sys
@@ -90,6 +91,9 @@ def check_text_bounds(actual: str, spec: dict, label: str, failures: list[str]) 
     for kw in spec.get("required_keywords", []):
         if kw.lower() not in text.lower():
             failures.append(f"{label}: missing required keyword {kw!r}")
+    any_of = spec.get("required_keywords_any_of")
+    if any_of and not any(kw.lower() in text.lower() for kw in any_of):
+        failures.append(f"{label}: none of the alternative keywords {any_of!r} present (need at least one)")
 
 
 def check_array_bounds(actual, spec: dict, label: str, failures: list[str]) -> None:
@@ -104,9 +108,49 @@ def check_array_bounds(actual, spec: dict, label: str, failures: list[str]) -> N
             failures.append(f"{label}: missing required item {kw!r}")
 
 
+# Phrases that assert a confirmed physical effect. Paired with a process noun,
+# these should never appear in the narrative text when physical_effect_assessment
+# itself says the effect was not observed or could not be confirmed, since that
+# would be the model contradicting its own grounded verdict in free text.
+_OVERCLAIM_PHRASES = [
+    "confirmed", "confirms", "successfully changed", "caused a change",
+    "resulted in", "actually moved", "physically changed", "took effect on the process",
+]
+_PROCESS_NOUNS = ["pressure", "valve", "reactor", "process", "chemical a", "feed"]
+
+
+def check_physical_claim_consistency(enriched: dict, failures: list[str]) -> None:
+    analysis = enriched.get("analysis", {})
+    assessment = analysis.get("physical_effect_assessment")
+    if assessment not in ("not_observed", "inconclusive"):
+        return  # nothing to check when a physical effect genuinely was observed
+    combined = f"{analysis.get('what_happened', '')} {analysis.get('likely_attack', '')}".lower()
+    for phrase in _OVERCLAIM_PHRASES:
+        if phrase in combined and any(noun in combined for noun in _PROCESS_NOUNS):
+            failures.append(
+                f"physical claim consistency: assessment is {assessment!r} but narrative text "
+                f"contains overclaiming language ({phrase!r})"
+            )
+            return
+
+
 def grade(enriched: dict, expected: dict) -> list[str]:
     failures: list[str] = []
     analysis = enriched.get("analysis", {})
+    tags = analysis.get("tags", [])
+
+    # If the real Claude call never happened (API outage, billing, schema
+    # violation), enrich_alert() substitutes a hardcoded fallback analysis.
+    # Grading that fallback against content expectations (a specific MITRE
+    # ID, specific keywords) always fails and always looks like a content
+    # defect in the report, when it's actually an availability problem.
+    # Surface that distinction explicitly instead of letting it masquerade as
+    # "the model got this wrong."
+    if "api-error" in tags:
+        return ["enrichment degraded to the API-error fallback (Claude call failed, check API key/billing/connectivity), not a content defect"]
+    if "schema-error" in tags:
+        return ["enrichment degraded to the schema-error fallback (Claude's tool call didn't match the schema), not a content defect"]
+
     sid = enriched.get("sid")
     severity = analysis.get("severity")
 
@@ -129,46 +173,117 @@ def grade(enriched: dict, expected: dict) -> list[str]:
     for field, spec in expected.get("array_checks", {}).items():
         check_array_bounds(analysis.get(field), spec, field, failures)
 
+    check_physical_claim_consistency(enriched, failures)
+
     return failures
 
 
-def run_case(input_path: Path) -> tuple[str, bool, list[str]]:
-    case_id = input_path.stem
-    expected_path = EXPECTED_DIR / f"{case_id}.expected.json"
-    if not expected_path.exists():
-        return case_id, False, [f"no expected file at {expected_path}"]
-
-    raw = json.loads(input_path.read_text())
-    expected = json.loads(expected_path.read_text())
-
-    # each case should be judged independently of real-world rate limiting
+def run_case_once(raw: dict, expected: dict) -> list[str]:
+    # each run should be judged independently of real-world rate limiting,
+    # and independently of any previous run in the same --repeat loop
     pipeline.last_call.pop(raw.get("alert", {}).get("signature_id"), None)
 
     enriched = pipeline.enrich_alert(raw)
     if enriched is None:
-        return case_id, False, ["enrich_alert returned None (no API key set, or client not connected)"]
+        return ["enrich_alert returned None (no API key set, or client not connected)"]
 
-    failures = grade(enriched, expected)
-    return case_id, len(failures) == 0, failures
+    return grade(enriched, expected)
+
+
+def run_case(input_path: Path, repeat: int = 1) -> tuple[str, int, int, list[str]]:
+    """Runs one frozen case `repeat` times and reports how many passed, not
+    just a single pass/fail, since Claude's output is not perfectly
+    deterministic even at low temperature."""
+    case_id = input_path.stem
+    expected_path = EXPECTED_DIR / f"{case_id}.expected.json"
+    if not expected_path.exists():
+        return case_id, 0, repeat, [f"no expected file at {expected_path}"]
+
+    raw = json.loads(input_path.read_text())
+    expected = json.loads(expected_path.read_text())
+
+    passed = 0
+    all_failures: list[str] = []
+    for i in range(repeat):
+        failures = run_case_once(raw, expected)
+        if failures:
+            all_failures.extend(f"run {i + 1}/{repeat}: {f}" for f in failures)
+        else:
+            passed += 1
+    return case_id, passed, repeat, all_failures
+
+
+def run_api_failure_case() -> tuple[str, int, int, list[str]]:
+    """Not a frozen input: directly exercises enrich_alert()'s exception path
+    by forcing the Claude call itself to raise. This path has only ever been
+    seen firing by accident before (a real invalid API key produced a 401
+    mid-session), never verified on purpose, so there was no guarantee it
+    would keep behaving correctly after a future change."""
+    case_id = "API_FAILURE_FALLBACK"
+    sid = 1000001
+    raw = {
+        "timestamp": "2026-01-01T00:00:00-0700",
+        "alert": {"signature_id": sid, "signature": "Unauthorized Coil Write!"},
+        "src_ip": "192.168.90.6", "src_port": 12345,
+        "dest_ip": "192.168.95.2", "dest_port": 502,
+        "proto": "TCP",
+    }
+    pipeline.last_call.pop(sid, None)
+
+    original_create = pipeline.client.messages.create
+    pipeline.client.messages.create = lambda *a, **kw: (_ for _ in ()).throw(
+        RuntimeError("simulated API failure for eval coverage")
+    )
+    try:
+        enriched = pipeline.enrich_alert(raw)
+    finally:
+        pipeline.client.messages.create = original_create
+
+    failures: list[str] = []
+    if enriched is None:
+        failures.append("enrich_alert returned None instead of a fallback analysis")
+        return case_id, 0, 1, failures
+
+    analysis = enriched.get("analysis", {})
+    check_severity_min(analysis.get("severity"), pipeline.MIN_SEVERITY[sid], failures)
+    if analysis.get("physical_effect_assessment") != "inconclusive":
+        failures.append(
+            f"physical_effect_assessment: expected 'inconclusive' on API failure, "
+            f"got {analysis.get('physical_effect_assessment')!r}"
+        )
+    if "api-error" not in analysis.get("tags", []):
+        failures.append("tags: expected an 'api-error' tag on the API-failure fallback")
+
+    return case_id, (0 if failures else 1), 1, failures
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description="Eval harness for ics_alert_pipeline.py")
+    parser.add_argument(
+        "--repeat", type=int, default=1,
+        help="Run each frozen case this many times and report consistency (default: 1, fast single pass)",
+    )
+    args = parser.parse_args()
+
     if not INPUTS_DIR.exists() or not any(INPUTS_DIR.glob("*.json")):
         print(f"[!] No frozen inputs found in {INPUTS_DIR}")
         sys.exit(1)
 
-    results = [run_case(p) for p in sorted(INPUTS_DIR.glob("*.json"))]
+    results = [run_case(p, args.repeat) for p in sorted(INPUTS_DIR.glob("*.json"))]
+    results.append(run_api_failure_case())  # deterministic mock, repeat adds no information
 
     print()
-    passed = 0
-    for case_id, ok, failures in results:
-        print(f"[{'PASS' if ok else 'FAIL'}] {case_id}")
+    for case_id, passed, total, failures in results:
+        ok = passed == total
+        suffix = f" ({passed}/{total})" if total > 1 else ""
+        print(f"[{'PASS' if ok else 'FAIL'}] {case_id}{suffix}")
         for f in failures:
             print(f"    - {f}")
-        passed += ok
 
-    print(f"\n{passed}/{len(results)} cases passed")
-    sys.exit(0 if passed == len(results) else 1)
+    fully_passed = sum(1 for _, passed, total, _ in results if passed == total)
+    repeat_note = f" (repeat={args.repeat})" if args.repeat > 1 else ""
+    print(f"\n{fully_passed}/{len(results)} cases passed{repeat_note}")
+    sys.exit(0 if fully_passed == len(results) else 1)
 
 
 if __name__ == "__main__":
